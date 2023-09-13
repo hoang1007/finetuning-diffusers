@@ -1,0 +1,5 @@
+librosa
+torch
+transformers
+diffusers
+accelerate
