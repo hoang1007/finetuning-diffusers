@@ -11,9 +11,6 @@ from omegaconf import DictConfig
 from diffusers.models import AutoencoderKL
 from diffusers.training_utils import EMAModel
 
-from torchvision.utils import make_grid
-from torchvision.transforms.functional import to_pil_image
-
 
 class FreezeGradient:
     def __init__(self, module: torch.nn.Module):
@@ -28,7 +25,6 @@ class FreezeGradient:
     def __exit__(self, exc_type, exc_value, traceback):
         self.module.requires_grad_(True)
         self.module.train(self.state)
-        return True
 
 
 class VAETrainingWrapper(TrainingWrapper):
@@ -61,20 +57,20 @@ class VAETrainingWrapper(TrainingWrapper):
 
         self.loss_fn = LPIPSWithDiscriminator(**lpips_config)
 
-    def on_start(self):
         if self.use_ema:
             self.ema = EMAModel(
                 self.vae.parameters(),
-                decay=self.trainer.training_args.ema_max_decay,
                 use_ema_warmup=True,
-                inv_gamma=self.trainer.training_args.ema_inv_gamma,
-                power=self.trainer.training_args.ema_power,
                 model_cls=AutoencoderKL,
                 model_config=self.vae.config,
             )
 
+    def on_start(self):
+        if self.use_ema:
+            self.ema.to(self.device)
+
     def get_last_layer(self):
-        return self.vae.decoder.conv_out
+        return self.vae.decoder.conv_out.weight
 
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
         x = batch[self.input_key]
@@ -136,15 +132,12 @@ class VAETrainingWrapper(TrainingWrapper):
         x_recon = self.vae.decode(z).sample
         x_gen = self.vae.decode(torch.randn_like(z)).sample
 
-        nrow = int(x_recon.size(0) ** 0.5)
-        org_imgrid = make_grid(x, nrow=nrow)
-        recon_imgrid = make_grid(x_recon, nrow=nrow)
-        gen_imgrid = make_grid(x_gen, nrow=nrow)
+        to_np_images = lambda x: (x.detach() / 2 + 0.5).clamp(0, 1).permute(0, 2, 3, 1).float().cpu().numpy()
         self.trainer.get_tracker().log_images(
             {
-                "original": to_pil_image(org_imgrid),
-                "reconstruction": to_pil_image(recon_imgrid),
-                "generation": to_pil_image(gen_imgrid),
+                "original": to_np_images(x),
+                "reconstruction": to_np_images(x_recon),
+                "generated": to_np_images(x_gen),
             }
         )
 
@@ -180,7 +173,7 @@ class VAETrainingWrapper(TrainingWrapper):
             self.ema.save_pretrained(osp.join(output_dir, "vae_ema"))
 
         for i, model in enumerate(models):
-            model.save_pretrained(osp.join(output_dir, f"vae"))
+            model.vae.save_pretrained(osp.join(output_dir, f"vae"))
             weights.pop()
 
     def load_model_hook(self, models, input_dir):
@@ -198,7 +191,7 @@ class VAETrainingWrapper(TrainingWrapper):
 
             # load diffusers style into model
             load_model = AutoencoderKL.from_pretrained(input_dir, subfolder="vae")
-            model.register_to_config(**load_model.config)
+            model.vae.register_to_config(**load_model.config)
 
-            model.load_state_dict(load_model.state_dict())
+            model.vae.load_state_dict(load_model.state_dict())
             del load_model

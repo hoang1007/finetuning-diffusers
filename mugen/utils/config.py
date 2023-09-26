@@ -1,3 +1,4 @@
+from typing import Dict, Any
 from omegaconf import DictConfig, OmegaConf
 import importlib
 
@@ -14,7 +15,7 @@ def get_config(config_path: str) -> DictConfig:
     return OmegaConf.load(config_path)
 
 
-def init_from_config(config: DictConfig, reload: bool = False):
+def init_from_config(config: Dict[str, Any], reload: bool = False):
     """Initialize object from config."""
     cfg = config.copy()
     target_key = '_target_'

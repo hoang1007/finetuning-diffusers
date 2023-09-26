@@ -12,7 +12,7 @@ from torchvision import transforms
 from .base import BaseDataModule
 
 
-class __CaptionImageDataset(Dataset):
+class CaptionImageDataset(Dataset):
     def __init__(self, data: List[Dict[str, Any]], transform: Optional[Callable] = None):
         super().__init__()
         self.data = data
@@ -53,7 +53,7 @@ class CaptionImageFolderDataModule(BaseDataModule):
             ]
         )
 
-        dataset = __CaptionImageDataset(self.__prepare(), augs)
+        dataset = CaptionImageDataset(self.__prepare(), augs)
         self.train_dataset, self.val_dataset = random_split(
             dataset,
             (train_ratio, 1 - train_ratio),

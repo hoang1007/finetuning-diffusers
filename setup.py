@@ -33,7 +33,7 @@ setup(
     name="mugen",
     version=read("mugen", "VERSION"),
     description="project_description",
-    url="https://github.com/author_name/project_urlname/",
+    url="https://github.com/hoang1007/music-generator",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
     author="Vu Huy Hoang",
@@ -42,5 +42,4 @@ setup(
     entry_points={
         "console_scripts": ["project_name = project_name.__main__:main"]
     },
-    extras_require={"test": read_requirements("requirements-test.txt")},
 )

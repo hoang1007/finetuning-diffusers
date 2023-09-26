@@ -52,6 +52,7 @@ class TrainingArguments:
         mixed_precision: Literal["no", "fp16", "bf16"] = "no",
         checkpointing_steps: int = 500,
         resume_from_checkpoint: str = None,
+        tracker_init_kwargs: dict = {},
     ):
         self.output_dir = output_dir
         self.overwrite_output_dir = overwrite_output_dir
@@ -82,15 +83,18 @@ class TrainingArguments:
         self.mixed_precision = mixed_precision
         self.checkpointing_steps = checkpointing_steps
         self.resume_from_checkpoint = resume_from_checkpoint
+        self.tracker_init_kwargs = tracker_init_kwargs
 
 
 class Trainer:
     def __init__(
         self,
+        project_name: str,
         wrapper: TrainingWrapper_,
         training_args: TrainingArguments,
         train_dataset: Dataset,
         eval_dataset: Dataset,
+        log_config: Dict = {},
     ):
         self.training_args = training_args
         self.global_step = 0
@@ -100,7 +104,7 @@ class Trainer:
             gradient_accumulation_steps=training_args.gradient_accumulation_steps,
             mixed_precision=training_args.mixed_precision,
             log_with=training_args.logger,
-            logging_dir=logging_dir,
+            # logging_dir=logging_dir,
         )
 
         if self.accelerator.is_local_main_process:
@@ -151,8 +155,12 @@ class Trainer:
         self.val_dataloader = self.accelerator.prepare_data_loader(self.val_dataloader)
 
         if self.accelerator.is_main_process:
-            run = os.path.split(__file__)[-1].split(".")[0]
-            self.accelerator.init_trackers(run)
+            # Got bug `first argument must be callable or None` when passing config
+            self.accelerator.init_trackers(
+                project_name,
+                init_kwargs=self.training_args.tracker_init_kwargs,
+            )
+            # self.accelerator.init_trackers(project_name)
 
     def start(self):
         total_batch_size = (
@@ -306,7 +314,7 @@ class TrainingWrapper(torch.nn.Module):
 
     def on_end(self):
         pass
-    
+
     def on_train_batch_start(self):
         pass
 
@@ -336,16 +344,16 @@ class TrainingWrapper(torch.nn.Module):
     @property
     def global_step(self):
         return self.trainer.global_step
-    
+
     @property
     def device(self):
         return self.trainer.accelerator.device
-    
-    def log(self, values: dict, log_kwargs: dict = None, logger: bool = True, progess_bar: bool = True):
+
+    def log(self, values: dict, logger: bool = True, progess_bar: bool = True):
         if progess_bar:
             self.progress_bar.set_postfix(values)
         if logger and self.trainer.accelerator.is_main_process:
-            self.trainer.accelerator.log(values, self.global_step, log_kwargs)
+            self.trainer.accelerator.log(values, self.global_step)
 
     def register_trainer(self, trainer: Trainer):
         self._trainer = trainer
