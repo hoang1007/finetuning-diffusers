@@ -1,5 +1,5 @@
-librosa
-torch
-transformers
-diffusers
-accelerate
+librosa==0.10.1
+torch==2.0.1
+transformers==4.33.2
+diffusers[torch]==0.21.2
+accelerate==0.23.0

@@ -1,0 +1,32 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 100
+
+  learning_rate: 5e-6
+  lr_scheduler_type: constant_with_warmup
+  lr_warmup_steps: 500
+
+  train_batch_size: 16
+  eval_batch_size: 8
+  data_loader_num_workers: 8
+
+  gradient_accumulation_steps: 1
+  logger: wandb
+  mixed_precision: fp16
+  checkpointing_steps: 1000
+  resume_from_checkpoint: null
+
+training_wrapper:
+  _target_: mugen.trainers.VAETrainingWrapper
+  pretrained_name_or_path: stabilityai/sd-vae-ft-mse
+  freeze_encoder: true
+  use_ema: true
+  input_key: image
+  lpips_config:
+    disc_start: 50001
+    kl_weight: 0.000001
+    disc_weight: 0.5
+
+datamodule:
+  _target_: mugen.datasets.CaptionImageFolderDataModule
+  data_dir: data
