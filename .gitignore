@@ -111,7 +111,7 @@ ipython_config.py
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
-
+    extras_require={"test": read_requirements("requirements-test.txt")},
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid
