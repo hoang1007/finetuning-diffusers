@@ -1,10 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Iterable
 import os.path as osp
 
 import torch
 from torch.optim import Optimizer
 
-from .base_trainer import TrainingWrapper
+from .base import TrainingModule
 from mugen.losses import LPIPSWithDiscriminator
 from omegaconf import DictConfig
 
@@ -27,7 +27,7 @@ class FreezeGradient:
         self.module.train(self.state)
 
 
-class VAETrainingWrapper(TrainingWrapper):
+class VAETrainingModule(TrainingModule):
     def __init__(
         self,
         vae_config: Optional[DictConfig] = None,
@@ -141,32 +141,11 @@ class VAETrainingWrapper(TrainingWrapper):
             }
         )
 
-    def get_optimizers(self) -> List[Optimizer]:
-        vae_opt = torch.optim.AdamW(
-            self.vae.decoder.parameters()
-            if self.freeze_encoder
-            else self.vae.parameters(),
-            lr=self.trainer.training_args.learning_rate,
-            weight_decay=self.trainer.training_args.adam_weight_decay,
-            betas=(
-                self.trainer.training_args.adam_beta1,
-                self.trainer.training_args.adam_beta2,
-            ),
-            eps=self.trainer.training_args.adam_epsilon,
-        )
-
-        disc_opt = torch.optim.AdamW(
-            self.loss_fn.discriminator.parameters(),
-            lr=self.trainer.training_args.learning_rate,
-            weight_decay=self.trainer.training_args.adam_weight_decay,
-            betas=(
-                self.trainer.training_args.adam_beta1,
-                self.trainer.training_args.adam_beta2,
-            ),
-            eps=self.trainer.training_args.adam_epsilon,
-        )
-
-        return [vae_opt, disc_opt]
+    def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
+        return [
+            self.vae.parameters(),
+            self.loss_fn.discriminator.parameters()
+        ]
 
     def save_model_hook(self, models, weights, output_dir):
         if self.use_ema:

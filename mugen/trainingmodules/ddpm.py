@@ -1,23 +1,19 @@
-from typing import List, Optional
+from typing import Iterable, List, Optional
 import os.path as osp
 
 import torch
 import torch.nn.functional as F
 from torch.optim import Optimizer
 
-from .base_trainer import TrainingWrapper
-from mugen.losses import LPIPSWithDiscriminator
+from .base import TrainingModule
 from omegaconf import DictConfig
 
 from diffusers.models import UNet2DModel
 from diffusers import DDIMPipeline, DDIMScheduler
 from diffusers.training_utils import EMAModel
 
-from torchvision.utils import make_grid
-from torchvision.transforms.functional import to_pil_image
 
-
-class DDPMTrainingWrapper(TrainingWrapper):
+class DDPMTrainingModule(TrainingModule):
     def __init__(
         self,
         unet_config: Optional[DictConfig] = None,
@@ -67,7 +63,7 @@ class DDPMTrainingWrapper(TrainingWrapper):
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
         x = batch[self.input_key]
         cond = batch.get(self.conditional_key, None)
-        noise = torch.rand_like(x)
+        noise = torch.randn_like(x)
         timesteps = torch.randint(
             0,
             self.noise_scheduler.config.num_train_timesteps,
@@ -107,6 +103,9 @@ class DDPMTrainingWrapper(TrainingWrapper):
         x = batch[self.input_key]
         cond = batch.get(self.conditional_key, None)
 
+        if self.use_ema:
+            self.ema.store(self.unet.parameters())
+            self.ema.copy_to(self.unet.parameters())
         pipeline = DDIMPipeline(self.unet, self.noise_scheduler)
         generator = torch.Generator(device=self.device).manual_seed(0)
 
@@ -115,6 +114,9 @@ class DDPMTrainingWrapper(TrainingWrapper):
             generator=generator,
             output_type='numpy'
         ).images
+
+        if self.use_ema:
+            self.ema.restore(self.unet.parameters())
 
         org_imgs = (x.detach() / 2 + 0.5).cpu().permute(0, 2, 3, 1).numpy()
 
@@ -125,19 +127,8 @@ class DDPMTrainingWrapper(TrainingWrapper):
             }
         )
 
-    def get_optimizers(self) -> List[Optimizer]:
-        opt = torch.optim.AdamW(
-            self.unet.parameters(),
-            lr=self.trainer.training_args.learning_rate,
-            weight_decay=self.trainer.training_args.adam_weight_decay,
-            betas=(
-                self.trainer.training_args.adam_beta1,
-                self.trainer.training_args.adam_beta2,
-            ),
-            eps=self.trainer.training_args.adam_epsilon,
-        )
-
-        return [opt]
+    def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
+        return [self.unet.parameters()]
 
     def save_model_hook(self, models, weights, output_dir):
         if self.use_ema:
