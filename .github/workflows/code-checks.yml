@@ -1,0 +1,18 @@
+name: Code check
+
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+    branches: [main, "release/*"]
+    paths:
+      - ".github/workflows/code-checks.yml"
+      - "mugen/**"
+
+jobs:
+  codecov:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Codecov
+      uses: codecov/codecov-action@v3.1.4
