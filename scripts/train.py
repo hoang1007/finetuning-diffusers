@@ -1,10 +1,12 @@
-import os
 from argparse import ArgumentParser
-from omegaconf import OmegaConf, DictConfig
+import os
+from omegaconf import OmegaConf
 
 from mugen.datamodules import BaseDataModule
-from mugen.trainers.base_trainer import Trainer, TrainingArguments, TrainingWrapper
-from mugen.utils.config import init_from_config
+from mugen.trainer import Trainer
+from mugen.training_args import TrainingArguments
+from mugen.trainingmodules.base import TrainingModule
+from mugen.utils.config_utils import init_from_config
 
 
 def parse_args():
@@ -26,19 +28,19 @@ def load_config(args):
     return config
 
 
-def main(config: DictConfig):
+def main(config: dict):
     training_args = TrainingArguments(**config['training_args'])
     datamodule: BaseDataModule = init_from_config(config['datamodule'])
-    training_wrapper: TrainingWrapper = init_from_config(config['training_wrapper'])
+    training_module: TrainingModule = init_from_config(config['training_module'])
 
     trainer = Trainer(
         "finetuning-diffusers",
-        training_wrapper,
+        training_module,
         training_args,
         datamodule.get_training_dataset(),
         datamodule.get_validation_dataset(),
     )
-
+    trainer.get_tracker().store_init_configuration(config)
     trainer.start()
 
 
