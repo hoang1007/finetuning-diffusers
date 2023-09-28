@@ -1,0 +1,42 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 100
+
+  learning_rate: 5e-5
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 1000
+
+  train_batch_size: 8
+  eval_batch_size: 4
+  data_loader_num_workers: 8
+
+  eval_steps: 2000
+
+  gradient_accumulation_steps: 1
+  logger: wandb
+  mixed_precision: fp16
+  save_steps: 1000
+  save_total_limit: 3
+  resume_from_checkpoint: latest
+
+  data_seed: 0
+
+  tracker_init_kwargs:
+    group: 'text2img'
+
+training_module:
+  _target_: mugen.trainingmodules.clip.CLIPTrainingModule
+  pretrained_name_or_path: openai/clip-vit-large-patch14
+  image_key: image
+  text_key: caption
+
+datamodule:
+  _target_: mugen.datamodules.ImageDataModule
+  data_path: animelover/genshin-impact-images
+  data_name: 0-sfw
+  train_split: train[:80%]
+  val_split: train[80%:]
+  image_column: image
+  caption_column: tags
+  resolution: 256
+  center_normalize: false

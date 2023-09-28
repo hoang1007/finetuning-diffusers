@@ -1,0 +1,52 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 200
+
+  learning_rate: 5e-5
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 1000
+
+  train_batch_size: 8
+  eval_batch_size: 8
+  data_loader_num_workers: 8
+
+  eval_steps: 5000
+
+  gradient_accumulation_steps: 1
+  logger: wandb
+  mixed_precision: fp16
+  save_steps: 1000
+  save_total_limit: 3
+  resume_from_checkpoint: latest
+
+  tracker_init_kwargs:
+    group: 'text2img'
+    resume: true
+
+training_module:
+  _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
+  pretrained_name_or_path: CompVis/stable-diffusion-v1-4
+  vae_pretrained_name_or_path: outputs/vae/checkpoint-20000/vae_ema
+  tokenizer_pretrained_name_or_path: outputs/clip_gi/checkpoint-15000/tokenizer
+  text_encoder_pretrained_name_or_path: outputs/clip_gi/checkpoint-15000/text_encoder
+  unet_config:
+    sample_size: 32
+    cross_attention_dim: 768
+    block_out_channels: [256, 256, 512, 512]
+
+  use_ema: true
+  enable_xformers_memory_efficient_attention: true
+  run_safety_checker: false
+
+datamodule:
+  _target_: mugen.datamodules.Text2ImageDataModule
+  data_path: animelover/genshin-impact-images
+  data_name: 0-sfw
+  train_split: train[:80%]
+  val_split: train[80%:]
+  image_column: image
+  caption_column: tags
+  resolution: 256
+  vae_pretrained_name_or_path: outputs/vae/checkpoint-20000/vae_ema
+  tokenizer_pretrained_name_or_path: outputs/clip_gi/checkpoint-15000/tokenizer
+  text_encoder_pretrained_name_or_path: outputs/clip_gi/checkpoint-15000/text_encoder

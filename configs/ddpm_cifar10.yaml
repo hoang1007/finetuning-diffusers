@@ -4,7 +4,7 @@ training_args:
 
   learning_rate: 1e-4
   lr_scheduler_type: constant_with_warmup
-  lr_warmup_steps: 500
+  warmup_steps: 1000
 
   train_batch_size: 256
   eval_batch_size: 64
@@ -13,14 +13,15 @@ training_args:
   gradient_accumulation_steps: 1
   logger: wandb
   mixed_precision: fp16
-  checkpointing_steps: 1000
-  resume_from_checkpoint: null
+  save_steps: 1000
+  save_total_limit: 3
+  resume_from_checkpoint: latest
 
   tracker_init_kwargs:
     group: 'ddpm'
 
-training_wrapper:
-  _target_: mugen.trainers.ddpm_trainer.DDPMTrainingWrapper
+training_module:
+  _target_: mugen.trainingmodules.ddpm.DDPMTrainingModule
   # pretrained_name_or_path: google/ddpm-cifar10-32
   unet_config:
     sample_size: 32
