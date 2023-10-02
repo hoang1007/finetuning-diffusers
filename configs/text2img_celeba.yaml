@@ -1,0 +1,52 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 200
+
+  learning_rate: 5e-5
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 1000
+
+  train_batch_size: 8
+  eval_batch_size: 8
+  data_loader_num_workers: 8
+
+  eval_steps: 2000
+
+  use_8bit_adam: true
+  mixed_precision: fp16
+  gradient_accumulation_steps: 8
+  logger: wandb
+  save_steps: 1000
+  save_total_limit: 3
+  resume_from_checkpoint: latest
+
+  tracker_init_kwargs:
+    group: 'celeba'
+    resume: true
+
+training_module:
+  _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
+  pretrained_name_or_path: CompVis/stable-diffusion-v1-4
+  vae_pretrained_name_or_path: outputs/vae_celaba/checkpoint-2000/vae_ema
+  tokenizer_pretrained_name_or_path: outputs/clip_celeba/checkpoint-4000/tokenizer
+  text_encoder_pretrained_name_or_path: outputs/clip_celeba/checkpoint-4000/text_encoder
+  unet_config:
+    sample_size: 32
+    cross_attention_dim: 768
+    block_out_channels: [256, 256, 512, 512]
+
+  use_ema: true
+  enable_xformers_memory_efficient_attention: true
+  run_safety_checker: false
+
+datamodule:
+  _target_: mugen.datamodules.Text2ImageDataModule
+  data_path: .cache/multi_modal_celeba
+  train_split: train[:80%]
+  val_split: train[80%:]
+  image_column: image
+  caption_column: caption
+  resolution: 256
+  vae_pretrained_name_or_path: ${training_module.vae_pretrained_name_or_path}
+  tokenizer_pretrained_name_or_path: ${training_module.tokenizer_pretrained_name_or_path}
+  text_encoder_pretrained_name_or_path: ${training_module.text_encoder_pretrained_name_or_path}
