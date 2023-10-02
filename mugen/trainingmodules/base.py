@@ -47,6 +47,9 @@ class TrainingModule(torch.nn.Module):
     def on_validation_epoch_end(self):
         pass
 
+    def clip_grad_norm_(self, parameters: Iterable[torch.nn.Parameter]):
+        self.trainer.clip_grad_norm_(parameters)
+
     @property
     def trainer(self) -> Trainer:
         return self._trainer

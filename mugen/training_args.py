@@ -1,8 +1,10 @@
 from typing import Literal, Optional
 from dataclasses import asdict, dataclass, field, fields
+import os
+
 import math
 
-from accelerate.utils import ProjectConfiguration
+from accelerate.utils import ProjectConfiguration, DeepSpeedPlugin
 
 
 @dataclass
@@ -59,6 +61,10 @@ class TrainingArguments:
             "help": "Number of updates steps to accumulate before performing a backward/update pass."
         },
     )
+    max_grad_norm: float = field(
+        default=1.0,
+        metadata={"help": "Max gradient norm"}
+    )
 
     learning_rate: float = field(
         default=5e-5, metadata={"help": "The initial learning rate for optimizers."}
@@ -74,6 +80,9 @@ class TrainingArguments:
     )
     adam_epsilon: float = field(
         default=1e-8, metadata={"help": "Epsilon for Adam optimizer."}
+    )
+    use_8bit_adam: bool = field(
+        default=False, metadata={"help": "Use 8bit Adam optimizer from bitsandbytes."}
     )
 
     lr_scheduler_type: Literal[
@@ -137,7 +146,8 @@ class TrainingArguments:
     )
 
     def __post_init__(self):
-        pass
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
     def get_warmup_steps(self, num_training_steps: int):
         warmup_steps = (
