@@ -81,15 +81,27 @@ class Trainer:
         ]
 
         # Prepare with Accelerator
-        self.training_module = self.accelerator.prepare_model(self.training_module)
-        for i in range(len(self.optimizers)):
-            self.optimizers[i] = self.accelerator.prepare_optimizer(self.optimizers[i])
-        for i in range(len(self.schedulers)):
-            self.schedulers[i] = self.accelerator.prepare_scheduler(self.schedulers[i])
-        self.train_dataloader = self.accelerator.prepare_data_loader(
-            self.train_dataloader
+        # self.training_module = self.accelerator.prepare(self.training_module)
+        # for i in range(len(self.optimizers)):
+        #     self.optimizers[i] = self.accelerator.prepare_optimizer(self.optimizers[i])
+        # for i in range(len(self.schedulers)):
+        #     self.schedulers[i] = self.accelerator.prepare_scheduler(self.schedulers[i])
+        # self.train_dataloader = self.accelerator.prepare_data_loader(
+        #     self.train_dataloader
+        # )
+        # self.val_dataloader = self.accelerator.prepare_data_loader(self.val_dataloader)
+        prepared = self.accelerator.prepare(
+            self.training_module,
+            self.train_dataloader,
+            self.val_dataloader,
+            *self.optimizers,
+            *self.schedulers,
         )
-        self.val_dataloader = self.accelerator.prepare_data_loader(self.val_dataloader)
+        self.training_module = prepared[0]
+        self.train_dataloader = prepared[1]
+        self.val_dataloader = prepared[2]
+        self.optimizers = prepared[3 : 3 + len(self.optimizers)]
+        self.schedulers = prepared[3 + len(self.optimizers) :]
 
         if self.accelerator.is_main_process:
             self.accelerator.init_trackers(
@@ -190,7 +202,10 @@ class Trainer:
 
                         if self.global_step % self.training_args.save_steps == 0:
                             if self.accelerator.is_main_process:
-                                prune_checkpoints(self.training_args.output_dir, self.training_args.save_total_limit - 1)
+                                prune_checkpoints(
+                                    self.training_args.output_dir,
+                                    self.training_args.save_total_limit - 1,
+                                )
                                 save_path = os.path.join(
                                     self.training_args.output_dir,
                                     f"checkpoint-{self.global_step}",
@@ -235,7 +250,23 @@ class Trainer:
         return self.accelerator.get_tracker(self.training_args.logger, unwrap)
 
     def create_optimizer(self, parameters: Iterable[Parameter]):
-        return torch.optim.AdamW(
+        if (
+            self.accelerator.state.deepspeed_plugin is not None
+            and "optimizer" in self.accelerator.state.deepspeed_plugin.deepspeed_config
+        ):
+            optimizer_cls = accelerate.utils.DummyOptim
+        elif self.training_args.use_8bit_adam:
+            try:
+                import bitsandbytes as bnb
+            except ImportError:
+                raise ImportError(
+                    "Please install bitsandbytes to use 8-bit Adam optimizer"
+                )
+            optimizer_cls = bnb.optim.AdamW8bit
+        else:
+            optimizer_cls = torch.optim.AdamW
+
+        return optimizer_cls(
             parameters,
             lr=self.training_args.learning_rate,
             betas=(self.training_args.adam_beta1, self.training_args.adam_beta2),
@@ -246,16 +277,29 @@ class Trainer:
     def create_scheduler(
         self, optimizer: Optimizer, num_training_steps: int, num_warmup_steps: int
     ) -> LRScheduler:
-        return get_scheduler(
-            self.training_args.lr_scheduler_type,
-            optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps,
-        )
+        if (
+            self.accelerator.state.deepspeed_plugin is None
+            or "scheduler"
+            not in self.accelerator.state.deepspeed_plugin.deepspeed_config
+        ):
+            lr_scheduler = get_scheduler(
+                name=self.training_args.lr_scheduler_type,
+                optimizer=optimizer,
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=num_training_steps,
+            )
+        else:
+            lr_scheduler = accelerate.utils.DummyScheduler(
+                optimizer,
+                total_num_steps=num_training_steps,
+                warmup_num_steps=num_warmup_steps,
+            )
+
+        return lr_scheduler
 
     def get_train_dataloader(self, dataset: Dataset):
         if self.training_args.data_seed is not None:
-            generator = torch.Generator().seed(self.training_args.data_seed)
+            generator = torch.Generator().manual_seed(self.training_args.data_seed)
         else:
             generator = None
 
@@ -274,3 +318,7 @@ class Trainer:
             num_workers=self.training_args.data_loader_num_workers,
             shuffle=False,
         )
+
+    def clip_grad_norm_(self, parameters: Iterable[torch.nn.Parameter]):
+        if self.accelerator.sync_gradients:
+            self.accelerator.clip_grad_norm_(parameters, self.training_args.max_grad_norm)
