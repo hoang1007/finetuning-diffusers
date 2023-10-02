@@ -11,7 +11,7 @@ from omegaconf import DictConfig
 from diffusers.models import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPImageProcessor
-from diffusers import StableDiffusionPipeline, DDIMScheduler
+from diffusers import StableDiffusionPipeline, DDIMScheduler, PNDMScheduler
 from diffusers.training_utils import EMAModel
 
 
@@ -81,13 +81,14 @@ class Text2ImageTrainingModule(TrainingModule):
                 model_config=self.unet.config,
             )
     
+        self.vae_config = self.get_pipeline().vae.config
 
     def on_start(self):
         if self.use_ema:
             self.ema.to(self.device)
 
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
-        x = batch[self.input_key]
+        x = batch[self.input_key] * self.vae_config.scaling_factor
         cond = batch[self.conditional_key]
         noise = torch.randn_like(x)
         timesteps = torch.randint(
@@ -135,7 +136,7 @@ class Text2ImageTrainingModule(TrainingModule):
         if self.enable_xformers_memory_efficient_attention:
             pipeline.enable_xformers_memory_efficient_attention()
 
-        images = pipeline(prompt_embeds=cond, output_type="numpy").images
+        images = pipeline(prompt_embeds=cond, output_type="np").images
 
         if self.use_ema:
             self.ema.restore(self.unet.parameters())
