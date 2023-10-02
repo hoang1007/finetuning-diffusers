@@ -1,0 +1,6 @@
+__pycache__
+.git
+.cache
+wandb
+taming
+outputs

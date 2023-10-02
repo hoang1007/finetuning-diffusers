@@ -1,0 +1,21 @@
+version: '3.5'
+
+services:
+  finetuning-diffusers:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    volumes:
+      - ../:/app
+    environment:
+      WANDB_API_KEY: ${WANDB_API_KEY}
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES}
+    tty: true
+    stdin_open: true
+    ipc: host
+    network_mode: host
