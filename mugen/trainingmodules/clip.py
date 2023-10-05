@@ -7,10 +7,12 @@ from torch.optim import Optimizer
 
 from .base import TrainingModule
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer, CLIPImageProcessor
-from mugen.metrics import Accuracy
+from mugen.metrics import MeanMetric
 
 
 class CLIPTrainingModule(TrainingModule):
+    LORA_TARGET_MODULES = ["fc1", "fc2", "q_proj", "k_proj", "v_proj", "out_proj"]
+
     def __init__(
         self,
         pretrained_name_or_path: Optional[str] = None,
@@ -19,11 +21,13 @@ class CLIPTrainingModule(TrainingModule):
         image_processor_config: Optional[Dict] = None,
         image_key: str = "image",
         text_key: str = "caption",
+        random_truncation: bool = False,
     ):
         super().__init__()
 
         self.image_key = image_key
         self.text_key = text_key
+        self.random_truncation = random_truncation
 
         assert (
             clip_config is not None or pretrained_name_or_path is not None
@@ -46,20 +50,39 @@ class CLIPTrainingModule(TrainingModule):
             self.processor.image_processor.do_rescale = False
 
         self.metrics = {
-            'val/acc': Accuracy(),
+            'val/cosine_similarity': MeanMetric(),
         }
 
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
         imgs = batch[self.image_key]
         texts = batch[self.text_key]
+        model_max_length = self.processor.tokenizer.model_max_length
 
-        model_input = self.processor(
-            text=texts,
-            images=imgs,
-            return_tensors='pt',
-            padding='max_length',
-            truncation=True,
-        )
+        processor_args = dict(text=texts, images=imgs, return_tensors='pt')
+
+        if self.random_truncation:
+            processor_args.update(padding=True, return_length=True)
+        else:
+            processor_args.update(padding='max_length', max_length=model_max_length, truncation=True)
+
+        model_input = self.processor(**processor_args)
+
+        if self.random_truncation:
+            length = model_input.pop('length')
+            truncated_input_ids = torch.zeros((len(length), model_max_length), dtype=torch.long)
+            truncated_attention_mask = torch.zeros((len(length), model_max_length), dtype=torch.long)
+
+            for i in range(len(length)):
+                if length[i] > model_max_length:
+                    trunc_start_idx = torch.randint(0, length[i] - model_max_length, (1,)).item()
+                else:
+                    trunc_start_idx = 0
+
+                truncated_input_ids[i] = model_input['input_ids'][i][trunc_start_idx: trunc_start_idx + model_max_length]
+                truncated_attention_mask[i] = model_input['attention_mask'][i][trunc_start_idx: trunc_start_idx + model_max_length]
+            model_input['input_ids'] = truncated_input_ids
+            model_input['attention_mask'] = truncated_attention_mask
+
         for k in model_input:
             model_input[k] = model_input[k].to(self.device)
 
@@ -86,11 +109,10 @@ class CLIPTrainingModule(TrainingModule):
         for k in model_input:
             model_input[k] = model_input[k].to(self.device)
 
-        logits_per_image = self.model(**model_input).logits_per_image
-        preds = logits_per_image.argmax(dim=-1)
-        labels = torch.arange(logits_per_image.size(0)).to(logits_per_image.device)
+        model_out = self.model(**model_input)
+        similarity = F.cosine_similarity(model_out.text_embeds, model_out.image_embeds, dim=-1)
 
-        self.metrics['val/acc'].update(preds, labels)
+        self.metrics['val/cosine_similarity'].update(similarity.mean().item())
 
     def on_validation_epoch_end(self):
         self.log({k: metric.compute() for k, metric in self.metrics.items()})
