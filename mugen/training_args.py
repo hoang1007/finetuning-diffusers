@@ -122,6 +122,29 @@ class TrainingArguments:
         default="no", metadata={"help": "Mixed precision training."}
     )
 
+    use_lora: bool = field(
+        default=False, metadata={"help": "Finetuning with LoRA."}
+    )
+    lora_rank: int = field(
+        default=8, metadata={"help": "LoRA rank, only used if use_lora is True."}
+    )
+    lora_alpha: int = field(
+        default=32, metadata={"help": "LoRA alpha, only used if use_lora is True."}
+    )
+    lora_rank_dropout: float = field(
+        default=0.0, metadata={"help": "LoRA rank dropout, only used if use_lora is True."}
+    )
+    lora_module_dropout: float = field(
+        default=0.0, metadata={"help": "LoRA dropout for disabling module at all."}
+    )
+    use_effective_conv2d: bool = field(
+        default=False, metadata={"help": "Use parameter effective decomposition for Conv2d 3x3 with ksize > 1."}
+    )
+
+    gradient_checkpointing: bool = field(
+        default=False, metadata={"help": "Use gradient checkpointing."}
+    )
+
     save_steps: int = (
         field(default=500, metadata={"help": "Save checkpoint every X updates steps."}),
     )

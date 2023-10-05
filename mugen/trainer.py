@@ -60,6 +60,33 @@ class Trainer:
         self.training_module = training_module
         self.training_module.register_trainer(self)
 
+        if self.training_args.use_lora:
+            from peft import get_peft_model
+            from peft.tuners.loha import LoHaConfig
+            self.training_module = get_peft_model(
+                model=self.training_module,
+                peft_config=LoHaConfig(
+                    r=self.training_args.lora_rank,
+                    alpha=self.training_args.lora_alpha,
+                    rank_dropout=self.training_args.lora_rank_dropout,
+                    module_dropout=self.training_args.lora_module_dropout,
+                    use_effective_conv2d=self.training_args.use_effective_conv2d,
+                    target_modules=self.training_module.LORA_TARGET_MODULES,
+                    init_weights=True
+                )
+            )
+
+        if self.training_args.gradient_checkpointing:
+            enable_modules = []
+            for m in self.training_module.children():
+                if hasattr(m, "enable_gradient_checkpointing"):
+                    m.enable_gradient_checkpointing()
+                    enable_modules.append(m._get_name())
+                elif hasattr(m, "gradient_checkpoint_enable"):
+                    m.gradient_checkpoint_enable()
+                    enable_modules.append(m._get_name())
+            self.accelerator.print("Gradient checkpointing enabled for modules:", enable_modules)
+
         self.train_dataloader = self.get_train_dataloader(train_dataset)
         self.val_dataloader = self.get_eval_dataloader(eval_dataset)
 
@@ -159,10 +186,7 @@ class Trainer:
                     self.global_step * self.training_args.gradient_accumulation_steps
                 )
                 first_epoch = self.global_step // num_update_steps_per_epoch
-                resume_step = resume_global_step % (
-                    num_update_steps_per_epoch
-                    * self.training_args.gradient_accumulation_steps
-                )
+                resume_step = resume_global_step % num_update_steps_per_epoch
 
         # Train!
         self.training_module.on_start()
@@ -170,6 +194,7 @@ class Trainer:
             with tqdm(
                 total=num_update_steps_per_epoch,
                 disable=not self.accelerator.is_local_main_process,
+                dynamic_ncols=True,
             ) as progress_bar:
                 self.training_module.register_progress_bar(progress_bar)
                 progress_bar.set_description(f"Epoch {epoch}")
