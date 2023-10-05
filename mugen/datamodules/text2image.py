@@ -25,6 +25,7 @@ class Text2ImageDataModule:
         vae_pretrained_name_or_path: str = None,
         tokenizer_pretrained_name_or_path: str = None,
         text_encoder_pretrained_name_or_path: str = None,
+        load_cached: bool = True,
         device: str = 'auto'
     ):
         save_path = osp.join(
@@ -34,7 +35,7 @@ class Text2ImageDataModule:
         train_save_path = osp.join(save_path, train_split)
         val_save_path = osp.join(save_path, val_split)
 
-        if osp.exists(save_path):
+        if osp.exists(save_path) and load_cached:
             self.train_data = load_from_disk(train_save_path)
             self.val_data = load_from_disk(val_save_path)
         else:
@@ -76,7 +77,6 @@ class Text2ImageDataModule:
                 image = example[image_column]
                 image = augs(image.convert('RGB')).unsqueeze(0).to(device)
                 z = vae.encode(image).latent_dist.sample().squeeze(0).cpu()
-                del image
                 return {'latent': z}
             
             print("Preparing latent vectors...")
