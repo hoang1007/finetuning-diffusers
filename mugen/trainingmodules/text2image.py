@@ -11,11 +11,27 @@ from omegaconf import DictConfig
 from diffusers.models import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPImageProcessor
-from diffusers import StableDiffusionPipeline, DDIMScheduler, PNDMScheduler
+from diffusers import StableDiffusionPipeline, DDPMScheduler, PNDMScheduler
 from diffusers.training_utils import EMAModel
 
 
 class Text2ImageTrainingModule(TrainingModule):
+    LORA_TARGET_MODULES = [
+        "to_q",
+        "to_k",
+        "to_v",
+        "proj",
+        "proj_in",
+        "proj_out",
+        "conv",
+        "conv1",
+        "conv2",
+        "conv_shortcut",
+        "to_out.0",
+        "time_emb_proj",
+        "ff.net.2",
+    ]
+
     def __init__(
         self,
         pretrained_name_or_path: Optional[str] = None,
@@ -44,6 +60,7 @@ class Text2ImageTrainingModule(TrainingModule):
         self.text_encoder_pretrained_name_or_path = text_encoder_pretrained_name_or_path
         self.safety_checker_pretrained_name_or_path = safety_checker_pretrained_name_or_path
         self.feature_extractor_pretrained_name_or_path = feature_extractor_pretrained_name_or_path
+        self.scheduler_pretrained_name_or_path = scheduler_pretrained_name_or_path
         self.run_safety_checker = run_safety_checker
 
         self.enable_xformers_memory_efficient_attention = (
@@ -60,11 +77,11 @@ class Text2ImageTrainingModule(TrainingModule):
             raise ValueError("Either `unet_config` or `pretrained_name_or_path` or `unet_pretrained_name_or_path` must be specified!")
 
         if scheduler_pretrained_name_or_path is not None:
-            self.noise_scheduler = DDIMScheduler.from_pretrained(
+            self.noise_scheduler = DDPMScheduler.from_pretrained(
                 scheduler_pretrained_name_or_path
             )
         elif pretrained_name_or_path is not None:
-            self.noise_scheduler = DDIMScheduler.from_pretrained(
+            self.noise_scheduler = DDPMScheduler.from_pretrained(
                 pretrained_name_or_path, subfolder="scheduler"
             )
         else:
@@ -216,12 +233,19 @@ class Text2ImageTrainingModule(TrainingModule):
         else:
             raise ValueError("Either `feature_extractor_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!")
         
+        if self.scheduler_pretrained_name_or_path:
+            scheduler = PNDMScheduler.from_pretrained(self.scheduler_pretrained_name_or_path)
+        elif self.pretrained_name_or_path:
+            scheduler = PNDMScheduler.from_pretrained(self.pretrained_name_or_path, subfolder="scheduler")
+        else:
+            raise ValueError("Either `scheduler_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!")
+
         pipeline = StableDiffusionPipeline(
             vae=vae,
             text_encoder=text_encoder,
             tokenizer=tokenizer,
             unet=self.unet,
-            scheduler=self.noise_scheduler,
+            scheduler=scheduler,
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
             requires_safety_checker=self.run_safety_checker,

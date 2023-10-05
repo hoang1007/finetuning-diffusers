@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class TrainingModule(torch.nn.Module):
+    LORA_TARGET_MODULES = None
+
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
         raise NotImplementedError
 
