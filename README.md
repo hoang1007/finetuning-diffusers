@@ -1,3 +1,8 @@
+Finetuning-diffusers aim to provide a simple way to finetune pretrained diffusion models on your own data. This repository is built on top of [diffusers](https://github.com/huggingface/diffusers.git), is designed to be easy to use and maximize customizability.
+
+Our project is highly insprired by [HuggingFace Transformers](https://github.com/huggingface/transformers.git) and [PyTorch Lightning](https://github.com/Lightning-AI/lightning.git).
+
+# Table of contents
 <!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
 
 - [Features](#features)
@@ -11,9 +16,6 @@
 
 <!-- TOC end -->
 
-Finetuning-diffusers aim to provide a simple way to finetune pretrained diffusion models on your own data. This repository is built on top of [diffusers](https://github.com/huggingface/diffusers.git), is designed to be easy to use and maximize customizability.
-
-Our project is highly insprired by [HuggingFace Transformers](https://github.com/huggingface/transformers.git) and [PyTorch Lightning](https://github.com/Lightning-AI/lightning.git).
 
 # Features
 - [x] Finetune on your own data
