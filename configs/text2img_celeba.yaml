@@ -14,15 +14,15 @@ training_args:
 
   use_8bit_adam: true
   mixed_precision: fp16
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 1
   logger: wandb
   save_steps: 1000
   save_total_limit: 3
-  resume_from_checkpoint: latest
+  # resume_from_checkpoint: latest
 
   tracker_init_kwargs:
     group: 'celeba'
-    resume: true
+    # resume: true
 
 training_module:
   _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
@@ -33,7 +33,7 @@ training_module:
   unet_config:
     sample_size: 32
     cross_attention_dim: 768
-    block_out_channels: [256, 256, 512, 512]
+    block_out_channels: [128, 256, 512, 512]
 
   use_ema: true
   enable_xformers_memory_efficient_attention: true
