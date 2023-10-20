@@ -6,4 +6,3 @@ transformers==4.33.2
 diffusers[torch]==0.21.2
 accelerate==0.23.0
 datasets==2.14.5
-

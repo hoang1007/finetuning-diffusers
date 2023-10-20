@@ -62,7 +62,8 @@ class Trainer:
 
         if self.training_args.use_lora:
             from peft import get_peft_model
-            from peft.tuners.loha import LoHaConfig
+            from peft import LoHaConfig
+
             self.training_module = get_peft_model(
                 model=self.training_module,
                 peft_config=LoHaConfig(
@@ -76,16 +77,10 @@ class Trainer:
                 )
             )
 
-        if self.training_args.gradient_checkpointing:
-            enable_modules = []
-            for m in self.training_module.children():
-                if hasattr(m, "enable_gradient_checkpointing"):
-                    m.enable_gradient_checkpointing()
-                    enable_modules.append(m._get_name())
-                elif hasattr(m, "gradient_checkpoint_enable"):
-                    m.gradient_checkpoint_enable()
-                    enable_modules.append(m._get_name())
-            self.accelerator.print("Gradient checkpointing enabled for modules:", enable_modules)
+        num_trainable_params = sum(p.numel() for p in training_module.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in training_module.parameters())
+        print(f"NUM TRAINABLE PARAMETERS: {num_trainable_params:,}")
+        print(f"TOTAL PARAMETERS: {total_params:,}")
 
         self.train_dataloader = self.get_train_dataloader(train_dataset)
         self.val_dataloader = self.get_eval_dataloader(eval_dataset)
@@ -108,15 +103,6 @@ class Trainer:
         ]
 
         # Prepare with Accelerator
-        # self.training_module = self.accelerator.prepare(self.training_module)
-        # for i in range(len(self.optimizers)):
-        #     self.optimizers[i] = self.accelerator.prepare_optimizer(self.optimizers[i])
-        # for i in range(len(self.schedulers)):
-        #     self.schedulers[i] = self.accelerator.prepare_scheduler(self.schedulers[i])
-        # self.train_dataloader = self.accelerator.prepare_data_loader(
-        #     self.train_dataloader
-        # )
-        # self.val_dataloader = self.accelerator.prepare_data_loader(self.val_dataloader)
         prepared = self.accelerator.prepare(
             self.training_module,
             self.train_dataloader,
@@ -189,6 +175,10 @@ class Trainer:
                 resume_step = resume_global_step % num_update_steps_per_epoch
 
         # Train!
+        import gc; gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         self.training_module.on_start()
         for epoch in range(first_epoch, self.training_args.num_epochs):
             with tqdm(
