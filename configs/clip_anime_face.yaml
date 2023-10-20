@@ -2,8 +2,8 @@ training_args:
   output_dir: outputs
   num_epochs: 100
 
-  learning_rate: 1e-4
-  lr_scheduler_type: cosine
+  learning_rate: 5e-5
+  lr_scheduler_type: linear
   warmup_steps: 1000
 
   train_batch_size: 16
@@ -20,11 +20,13 @@ training_args:
   save_total_limit: 3
   resume_from_checkpoint: latest
 
+  seed: 42
   data_seed: 0
 
   tracker_init_kwargs:
-    group: 'text2img'
-    name: 'finetuning-clip-large-gi'
+    group: 'anime-face'
+    name: 'finetuning-clip-large-anime-face'
+    tags: ['anime-face']
     # resume: true
 
 training_module:
@@ -36,11 +38,10 @@ training_module:
 
 datamodule:
   _target_: mugen.datamodules.ImageDataModule
-  data_path: animelover/genshin-impact-images
-  data_name: 0-sfw
-  train_split: train[:80%]
-  val_split: train[80%:]
-  image_column: image
-  caption_column: tags
+  data_path: huanngzh/anime_face_control_60k
+  train_split: train[:90%]
+  val_split: train[90%:]
+  image_column: target
+  caption_column: prompt
   resolution: 256
   center_normalize: false

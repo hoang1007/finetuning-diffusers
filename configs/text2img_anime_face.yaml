@@ -6,13 +6,13 @@ training_args:
   lr_scheduler_type: constant_with_warmup
   warmup_steps: 1000
 
-  train_batch_size: 8
+  train_batch_size: 32
   eval_batch_size: 4
   data_loader_num_workers: 8
 
-  eval_steps: 1000
+  eval_steps: 2000
 
-  gradient_accumulation_steps: 8
+  gradient_accumulation_steps: 1
   mixed_precision: fp16
   use_8bit_adam: true
 
@@ -22,15 +22,16 @@ training_args:
   resume_from_checkpoint: latest
 
   tracker_init_kwargs:
-    group: 'text2img'
-    name: 'sd-32-gi'
+    group: 'anime-face'
+    name: 'sd-32-anime-face'
+    tags: ['anime-face', 'sd-32']
 
 training_module:
   _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
   pretrained_name_or_path: CompVis/stable-diffusion-v1-4
-  vae_pretrained_name_or_path: outputs/vae/checkpoint-20000/vae_ema
-  tokenizer_pretrained_name_or_path: outputs/clip_gi_new/checkpoint-26000/tokenizer
-  text_encoder_pretrained_name_or_path: outputs/clip_gi_new/checkpoint-26000/text_encoder
+  vae_pretrained_name_or_path: stabilityai/sd-vae-ft-mse
+  tokenizer_pretrained_name_or_path: outputs/clip_anime_face/checkpoint-4000/tokenizer
+  text_encoder_pretrained_name_or_path: outputs/clip_anime_face/checkpoint-4000/text_encoder
   unet_config:
     sample_size: 32
     cross_attention_dim: 768
@@ -42,15 +43,15 @@ training_module:
 
 datamodule:
   _target_: mugen.datamodules.Text2ImageDataModule
-  data_path: animelover/genshin-impact-images
-  data_name: 0-sfw
-  train_split: train[:80%]
-  val_split: train[80%:]
-  image_column: image
-  caption_column: tags
+  data_path: huanngzh/anime_face_control_60k
+  train_split: train[:95%]
+  val_split: train[95%:]
+  image_column: target
+  caption_column: prompt
   resolution: 256
   random_flip: false
   vae_pretrained_name_or_path: ${training_module.vae_pretrained_name_or_path}
   tokenizer_pretrained_name_or_path: ${training_module.tokenizer_pretrained_name_or_path}
   text_encoder_pretrained_name_or_path: ${training_module.text_encoder_pretrained_name_or_path}
-  batch_size: 4
+  batch_size: 16
+  # load_cached: false

@@ -1,0 +1,54 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 2000
+
+  learning_rate: 5e-5
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 1000
+
+  train_batch_size: 64
+  eval_batch_size: 16
+  data_loader_num_workers: 8
+
+  eval_steps: 2000
+
+  gradient_accumulation_steps: 1
+  logger: wandb
+  mixed_precision: fp16
+  use_8bit_adam: true
+  save_steps: 1000
+  save_total_limit: 3
+  resume_from_checkpoint: latest
+
+  tracker_init_kwargs:
+    group: 'ddpm'
+    tags: ['celeba', 'ddpm']
+
+training_module:
+  _target_: mugen.trainingmodules.LDMTrainingModule
+  unet_config:
+    sample_size: 32
+    in_channels: 4
+    out_channels: 4
+    block_out_channels: [128, 256, 512, 512]
+    layers_per_block: 2
+    down_block_types: ['DownBlock2D', 'AttnDownBlock2D', 'AttnDownBlock2D', 'DownBlock2D']
+    up_block_types: ['UpBlock2D', 'AttnUpBlock2D', 'AttnUpBlock2D', 'UpBlock2D']
+  vae_pretrained_name_or_path: outputs/vae_celaba/checkpoint-2000/vae_ema
+  scheduler_config:
+    num_train_timesteps: 1000
+    beta_schedule: 'linear'
+    beta_start: 1e-4
+    beta_end: 2e-2
+  use_ema: true
+
+datamodule:
+  _target_: mugen.datamodules.LDMDataModule
+  data_path: .cache/multi_modal_celeba
+  train_split: train[:80%]
+  val_split: train[80%:]
+  image_column: image
+  resolution: 256
+  random_flip: false
+  center_crop: false
+  vae_pretrained_name_or_path: ${training_module.vae_pretrained_name_or_path}
