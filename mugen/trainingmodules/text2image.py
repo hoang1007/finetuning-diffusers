@@ -47,6 +47,7 @@ class Text2ImageTrainingModule(TrainingModule):
         conditional_key: str = "text_embedding",
         use_ema: bool = True,
         enable_xformers_memory_efficient_attention: bool = False,
+        enable_gradient_checkpointing: bool = False,
         run_safety_checker: bool = True,
     ):
         super().__init__()
@@ -89,6 +90,9 @@ class Text2ImageTrainingModule(TrainingModule):
 
         if self.enable_xformers_memory_efficient_attention:
             self.unet.enable_xformers_memory_efficient_attention()
+        
+        if enable_gradient_checkpointing:
+            self.unet.enable_gradient_checkpointing()
 
         if self.use_ema:
             self.ema = EMAModel(
@@ -153,12 +157,17 @@ class Text2ImageTrainingModule(TrainingModule):
         if self.enable_xformers_memory_efficient_attention:
             pipeline.enable_xformers_memory_efficient_attention()
 
-        images = pipeline(prompt_embeds=cond, output_type="np").images
+        real_images = pipeline.vae.decode(batch[self.input_key], return_dict=False)[0]
+        real_images = (real_images / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
+        real_images = real_images.cpu().permute(0, 2, 3, 1).float().numpy()
+        gen_images = pipeline(prompt_embeds=cond, output_type="np").images
+        del pipeline
 
         if self.use_ema:
             self.ema.restore(self.unet.parameters())
 
-        self.trainer.get_tracker().log_images({"generated": images})
+        self.trainer.get_tracker().log_images({"generated": gen_images, "real": real_images})
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.unet.parameters()]

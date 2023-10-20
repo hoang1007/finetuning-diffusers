@@ -159,7 +159,6 @@ training_args: # Config for TrainingArguments
   lr_scheduler_type: constant_with_warmup
   warmup_steps: 1000
 
-  gradient_checkpointing: true # Enable gradient checkpointing
   mixed_precision: fp16
 
   train_batch_size: 256
@@ -185,6 +184,7 @@ training_module: # Used to instantiate TrainingModule
     num_train_timesteps: 1000
   use_ema: true
   enable_xformers_memory_efficient_attention: true
+  enable_gradient_checkpointing: true
 
 datamodule: # Used to instantiate DataModule
   _target_: mugen.datamodules.ImageDataModule

@@ -141,10 +141,6 @@ class TrainingArguments:
         default=False, metadata={"help": "Use parameter effective decomposition for Conv2d 3x3 with ksize > 1."}
     )
 
-    gradient_checkpointing: bool = field(
-        default=False, metadata={"help": "Use gradient checkpointing."}
-    )
-
     save_steps: int = (
         field(default=500, metadata={"help": "Save checkpoint every X updates steps."}),
     )
