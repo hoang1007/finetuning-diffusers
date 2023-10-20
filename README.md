@@ -20,7 +20,7 @@ Our project is highly insprired by [HuggingFace Transformers](https://github.com
 # Features
 - [x] Finetune on your own data
 - [x] Memory efficiency training with DeepSpeed, bitsandbytes integrated
-- [ ] Finetune diffusion models with LoRA (not fully tested yet)
+- [x] Finetune diffusion models with LoRA
 
 # Setup
 Just only clone and install this repository:
