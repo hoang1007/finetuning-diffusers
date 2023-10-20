@@ -1,5 +1,6 @@
 from typing import Iterable, List, Optional, Dict
 import os.path as osp
+from collections import defaultdict
 
 import torch
 import torch.nn.functional as F
@@ -49,9 +50,11 @@ class CLIPTrainingModule(TrainingModule):
             print('Feature extractor should not rescale images. Setting do_rescale to False')
             self.processor.image_processor.do_rescale = False
 
-        self.metrics = {
-            'val/cosine_similarity': MeanMetric(),
-        }
+        # self.metrics = {
+        #     'val/cosine_similarity': MeanMetric(),
+        #     'val/text2img_mean_rank': MeanMetric()
+        # }
+        self.metrics = defaultdict(MeanMetric)
 
     def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
         imgs = batch[self.image_key]
@@ -63,23 +66,34 @@ class CLIPTrainingModule(TrainingModule):
         if self.random_truncation:
             processor_args.update(padding=True, return_length=True)
         else:
-            processor_args.update(padding='max_length', max_length=model_max_length, truncation=True)
+            processor_args.update(
+                padding='max_length',
+                max_length=model_max_length,
+                truncation=True
+            )
 
         model_input = self.processor(**processor_args)
 
         if self.random_truncation:
+            max_seq_len = model_max_length - 2
             length = model_input.pop('length')
-            truncated_input_ids = torch.zeros((len(length), model_max_length), dtype=torch.long)
-            truncated_attention_mask = torch.zeros((len(length), model_max_length), dtype=torch.long)
+            truncated_input_ids = torch.zeros(len(length), model_max_length, dtype=torch.long)
+            truncated_attention_mask = torch.zeros(len(length), model_max_length, dtype=torch.long)
+
+            truncated_input_ids[:, 0] = self.processor.tokenizer.bos_token_id
+            truncated_input_ids[:, -1] = self.processor.tokenizer.eos_token_id
+            truncated_attention_mask[:, 0] = 1
+            truncated_attention_mask[:, -1] = 1
 
             for i in range(len(length)):
                 if length[i] > model_max_length:
-                    trunc_start_idx = torch.randint(0, length[i] - model_max_length, (1,)).item()
+                    # select a random start index from [1, length - max_seq_len - 1] (skip bos and eos tokens)
+                    trunc_start_idx = torch.randint(1, length[i] - max_seq_len - 1, (1,)).item()
                 else:
-                    trunc_start_idx = 0
+                    trunc_start_idx = 1
 
-                truncated_input_ids[i] = model_input['input_ids'][i][trunc_start_idx: trunc_start_idx + model_max_length]
-                truncated_attention_mask[i] = model_input['attention_mask'][i][trunc_start_idx: trunc_start_idx + model_max_length]
+                truncated_input_ids[i, 1:-1] = model_input['input_ids'][i, trunc_start_idx: trunc_start_idx + max_seq_len]
+                truncated_attention_mask[i, 1:-1] = model_input['attention_mask'][i, trunc_start_idx: trunc_start_idx + max_seq_len]
             model_input['input_ids'] = truncated_input_ids
             model_input['attention_mask'] = truncated_attention_mask
 
@@ -111,8 +125,20 @@ class CLIPTrainingModule(TrainingModule):
 
         model_out = self.model(**model_input)
         similarity = F.cosine_similarity(model_out.text_embeds, model_out.image_embeds, dim=-1)
-
         self.metrics['val/cosine_similarity'].update(similarity.mean().item())
+
+        logits = {"image_to_text": model_out.logits_per_image, "text_to_image": model_out.logits_per_text}
+        ground_truth = torch.arange(len(texts), device=self.device).view(-1, 1)
+
+        for name, logit in logits.items():
+            ranking = torch.argsort(logit, descending=True)
+            preds = torch.where(ranking == ground_truth)[1]
+            preds = preds.detach().cpu()
+            self.metrics[f"{name}_mean_rank"].update(preds.float().mean() + 1)
+            self.metrics[f"{name}_median_rank"].update(torch.floor(torch.median(preds)) + 1)
+            for k in [1, 5, 10]:
+                self.metrics[f"{name}_R@{k}"].update(torch.mean((preds < k).float()))
+
 
     def on_validation_epoch_end(self):
         self.log({k: metric.compute() for k, metric in self.metrics.items()})
