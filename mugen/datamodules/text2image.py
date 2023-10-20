@@ -1,6 +1,6 @@
 from typing import Optional
 import os.path as osp
-from datasets import load_dataset, load_from_disk, IterableDataset
+from datasets import load_dataset, load_from_disk
 
 import torch
 from torchvision import transforms
@@ -22,10 +22,12 @@ class Text2ImageDataModule:
         resolution: int = 256,
         center_crop: bool = True,
         random_flip: bool = True,
+        pipeline_name_or_path: str = None,
         vae_pretrained_name_or_path: str = None,
         tokenizer_pretrained_name_or_path: str = None,
         text_encoder_pretrained_name_or_path: str = None,
         load_cached: bool = True,
+        batch_size: int = 32,
         device: str = 'auto'
     ):
         save_path = osp.join(
@@ -70,27 +72,46 @@ class Text2ImageDataModule:
             if device == 'auto':
                 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-            vae = AutoencoderKL.from_pretrained(vae_pretrained_name_or_path)
+            if vae_pretrained_name_or_path:
+                vae = AutoencoderKL.from_pretrained(vae_pretrained_name_or_path)
+            elif pipeline_name_or_path:
+                vae = AutoencoderKL.from_pretrained(pipeline_name_or_path, subfolder='vae')
+            else:
+                raise ValueError("Either vae_pretrained_name_or_path or pipeline_name_or_path must be provided.")
             vae.to(device)
 
-            def prepare_latent(example):
-                image = example[image_column]
-                image = augs(image.convert('RGB')).unsqueeze(0).to(device)
-                z = vae.encode(image).latent_dist.sample().squeeze(0).cpu()
-                return {'latent': z}
+            def prepare_latent(examples):
+                images = examples[image_column]
+                images = [augs(img.convert('RGB')).unsqueeze(0).to(device) for img in images]
+                images = torch.cat(images, dim=0)
+                z = vae.encode(images).latent_dist.sample().squeeze(0).cpu()
+
+                examples['latent'] = z
+                return examples
             
             print("Preparing latent vectors...")
-            self.train_data = self.train_data.map(prepare_latent, writer_batch_size=1)
-            self.val_data = self.val_data.map(prepare_latent, writer_batch_size=1)
+            self.train_data = self.train_data.map(prepare_latent, batch_size=batch_size, writer_batch_size=1, batched=True)
+            self.val_data = self.val_data.map(prepare_latent, batch_size=batch_size, writer_batch_size=1, batched=True)
             del vae
 
-            tokenizer = CLIPTokenizer.from_pretrained(tokenizer_pretrained_name_or_path)
-            text_encoder = CLIPTextModel.from_pretrained(text_encoder_pretrained_name_or_path)
+            if tokenizer_pretrained_name_or_path:
+                tokenizer = CLIPTokenizer.from_pretrained(tokenizer_pretrained_name_or_path)
+            elif pipeline_name_or_path:
+                tokenizer = CLIPTokenizer.from_pretrained(pipeline_name_or_path, subfolder='tokenizer')
+            else:
+                raise ValueError("Either tokenizer_pretrained_name_or_path or pipeline_name_or_path must be provided.")
+
+            if text_encoder_pretrained_name_or_path:
+                text_encoder = CLIPTextModel.from_pretrained(text_encoder_pretrained_name_or_path)
+            elif pipeline_name_or_path:
+                text_encoder = CLIPTextModel.from_pretrained(pipeline_name_or_path, subfolder='text_encoder')
+            else:
+                raise ValueError("Either text_encoder_pretrained_name_or_path or pipeline_name_or_path must be provided.")
             text_encoder.to(device)
-            def prepare_text_embedding(example):
-                caption = example[caption_column]
+            def prepare_text_embedding(examples):
+                captions = examples[caption_column]
                 tokenized = tokenizer(
-                    [caption],
+                    captions,
                     return_tensors='pt',
                     padding='max_length',
                     truncation=True,
@@ -100,11 +121,12 @@ class Text2ImageDataModule:
                     tokenized[k] = tokenized[k].to(device)
                 
                 embedding = text_encoder(**tokenized)[0].squeeze(0).cpu()
-                return {'text_embedding': embedding}
+                examples['text_embedding'] = embedding
+                return examples
 
             print("Preparing text embeddings...")
-            self.train_data = self.train_data.map(prepare_text_embedding, writer_batch_size=1)
-            self.val_data = self.val_data.map(prepare_text_embedding, writer_batch_size=1)
+            self.train_data = self.train_data.map(prepare_text_embedding, batch_size=batch_size, writer_batch_size=1, batched=True)
+            self.val_data = self.val_data.map(prepare_text_embedding, batch_size=batch_size, writer_batch_size=1, batched=True)
             del text_encoder, tokenizer
 
             self.train_data.set_format(type='torch', columns=['latent', 'text_embedding'])
