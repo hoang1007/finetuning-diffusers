@@ -193,7 +193,7 @@ class Trainer:
                 disable=not self.accelerator.is_local_main_process,
                 dynamic_ncols=True,
             ) as progress_bar:
-                self.training_module.register_progress_bar(progress_bar)
+                unwrap_model(self.training_module).register_progress_bar(progress_bar)
                 progress_bar.set_description(f"Epoch {epoch}")
 
                 self.training_module.train()
