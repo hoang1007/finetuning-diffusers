@@ -8,7 +8,7 @@ from mugen.trainingmodules.base import TrainingModule
 from mugen.utils.config_utils import init_from_config
 
 
-def load_config(args):
+def load_config():
     config = OmegaConf.from_cli()
 
     if 'config' in conf:
