@@ -1,4 +1,3 @@
-from argparse import ArgumentParser
 import os
 from omegaconf import OmegaConf
 
@@ -9,15 +8,13 @@ from mugen.trainingmodules.base import TrainingModule
 from mugen.utils.config_utils import init_from_config
 
 
-def parse_args():
-    parser = ArgumentParser()
-    parser.add_argument("config", type=str)
-
-    return parser.parse_args()
-
-
 def load_config(args):
-    config = OmegaConf.load(args.config)
+    config = OmegaConf.from_cli()
+
+    if 'config' in conf:
+        base_config = OmegaConf.load(config.config)
+        config = OmegaConf.merge(base_config, config)
+
     config = OmegaConf.to_container(config, resolve=True)
     config_name = os.path.splitext(os.path.basename(args.config))[0]
 
@@ -45,6 +42,5 @@ def main(config: dict):
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    config = load_config(args)
+    config = load_config()
     main(config)
