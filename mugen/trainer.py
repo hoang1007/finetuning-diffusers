@@ -217,7 +217,10 @@ class Trainer:
                             loss = self.training_module(batch, step, opt_idx)
                             self.accelerator.backward(loss)
                             if self.training_args.max_grad_norm is not None:
-                                self.clip_grad_norm_(opt.params, self.training_args.max_grad_norm)
+                                self.clip_grad_norm_(
+                                    unwrap_model(self.training_module).get_optim_params()[opt_idx],
+                                    self.training_args.max_grad_norm
+                                )
                             opt.step()
                         for scheduler in self.schedulers:
                             scheduler.step()
