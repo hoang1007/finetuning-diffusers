@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class TrainingModule(torch.nn.Module, BaseHook):
     LORA_TARGET_MODULES = None
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int) -> torch.Tensor:
         raise NotImplementedError
 
     def validation_step(self, batch, batch_idx: int):

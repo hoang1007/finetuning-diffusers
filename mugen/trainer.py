@@ -212,7 +212,13 @@ class Trainer:
                     self.hook_handler.on_train_batch_start()
 
                     with self.accelerator.accumulate(self.training_module):
-                        self.training_module(batch, self.optimizers, step)
+                        for opt_idx, opt in enumerate(self.optimizers):
+                            opt.zero_grad()
+                            loss = self.training_module(batch, step, opt_idx)
+                            self.accelerator.backward(loss)
+                            if self.training_args.max_grad_norm is not None:
+                                self.clip_grad_norm_(opt.params, self.training_args.max_grad_norm)
+                            opt.step()
                         for scheduler in self.schedulers:
                             scheduler.step()
 
