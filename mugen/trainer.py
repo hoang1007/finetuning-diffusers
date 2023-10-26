@@ -14,6 +14,8 @@ from accelerate.logging import get_logger
 from diffusers.optimization import get_scheduler
 
 from mugen.utils.trainer_utils import set_seed, get_last_checkpoint, prune_checkpoints
+from mugen.ddp_wrapper import unwrap_model, DDPWrapper
+from mugen.hooks import HookHandler
 
 if TYPE_CHECKING:
     from mugen import TrainingArguments
@@ -76,6 +78,8 @@ class Trainer:
                     init_weights=True
                 )
             )
+        # Wrap TrainingModule with DDPWrapper
+        self.training_module = DDPWrapper(self.training_module)
 
         num_trainable_params = sum(p.numel() for p in training_module.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in training_module.parameters())
@@ -87,7 +91,7 @@ class Trainer:
 
         self.optimizers = [
             self.create_optimizer(params)
-            for params in self.training_module.get_optim_params()
+            for params in unwrap_model(self.training_module).get_optim_params()
         ]
 
         num_training_steps = len(self.train_dataloader) * self.training_args.num_epochs
@@ -123,6 +127,9 @@ class Trainer:
                     self.training_args.logger: self.training_args.tracker_init_kwargs
                 },
             )
+
+        self.hook_handler = HookHandler()
+        self.hook_handler.register_hook(unwrap_model(self.training_module))
 
     def start(self):
         total_batch_size = (
@@ -179,7 +186,7 @@ class Trainer:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        self.training_module.on_start()
+        self.hook_handler.on_start()
         for epoch in range(first_epoch, self.training_args.num_epochs):
             with tqdm(
                 total=num_update_steps_per_epoch,
@@ -190,7 +197,7 @@ class Trainer:
                 progress_bar.set_description(f"Epoch {epoch}")
 
                 self.training_module.train()
-                self.training_module.on_train_epoch_start()
+                self.hook_handler.on_train_epoch_start()
                 for step, batch in enumerate(self.train_dataloader):
                     # Skip steps until we reach the resumed step
                     if (
@@ -202,15 +209,15 @@ class Trainer:
                             progress_bar.update(1)
                         continue
 
-                    self.training_module.on_train_batch_start()
+                    self.hook_handler.on_train_batch_start()
 
                     with self.accelerator.accumulate(self.training_module):
-                        self.training_module.training_step(batch, self.optimizers, step)
+                        self.training_module(batch, self.optimizers, step)
                         for scheduler in self.schedulers:
                             scheduler.step()
 
                     if self.accelerator.sync_gradients:
-                        self.training_module.on_train_batch_end()
+                        self.hook_handler.on_train_batch_end()
                         progress_bar.update(1)
 
                         self.global_step += 1
@@ -236,7 +243,7 @@ class Trainer:
                             self._eval_loop()
 
                 if self.accelerator.is_main_process:
-                    self.training_module.on_train_epoch_end()
+                    self.hook_handler.on_train_epoch_end()
 
             self.accelerator.wait_for_everyone()
         self.accelerator.end_training()
@@ -250,13 +257,13 @@ class Trainer:
 
             self.training_module.eval()
             with torch.inference_mode():
-                self.training_module.on_validation_epoch_start()
+                self.hook_handler.on_validation_epoch_start()
                 for step, batch in enumerate(self.val_dataloader):
-                    self.training_module.validation_step(batch, step)
+                    self.training_module(batch, step)
                     progress_bar.update(1)
 
                 if self.accelerator.is_main_process:
-                    self.training_module.on_validation_epoch_end()
+                    self.hook_handler.on_validation_epoch_end()
 
     def evaluate(self):
         self._eval_loop()
