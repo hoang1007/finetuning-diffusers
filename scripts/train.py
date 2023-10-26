@@ -16,7 +16,7 @@ def load_config():
         config = OmegaConf.merge(base_config, config)
 
     config = OmegaConf.to_container(config, resolve=True)
-    config_name = os.path.splitext(os.path.basename(args.config))[0]
+    config_name = os.path.splitext(os.path.basename(config.config))[0]
 
     if config.get("project_name") is None:
         config['project_name'] = config_name
