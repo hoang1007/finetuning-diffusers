@@ -8,7 +8,7 @@ training_args:
 
   train_batch_size: 256
   eval_batch_size: 64
-  data_loader_num_workers: 8
+  data_loader_num_workers: 2
 
   gradient_accumulation_steps: 1
   logger: wandb
@@ -19,6 +19,7 @@ training_args:
 
   tracker_init_kwargs:
     group: 'ddpm'
+    name: 'ddpm-cifar10'
 
 training_module:
   _target_: mugen.trainingmodules.ddpm.DDPMTrainingModule
@@ -35,11 +36,11 @@ training_module:
     beta_start: 1e-4
     beta_end: 2e-2
   use_ema: true
-  enable_xformers_memory_efficient_attention: true
+  enable_xformers_memory_efficient_attention: false
 
 datamodule:
   _target_: mugen.datamodules.ImageDataModule
-  dataset_name: cifar10
+  data_path: cifar10
   train_split: train
   val_split: test
   image_column: img
