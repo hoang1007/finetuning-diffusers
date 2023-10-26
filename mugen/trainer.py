@@ -219,7 +219,6 @@ class Trainer:
                             if self.training_args.max_grad_norm is not None:
                                 self.clip_grad_norm_(
                                     unwrap_model(self.training_module).get_optim_params()[opt_idx],
-                                    self.training_args.max_grad_norm
                                 )
                             opt.step()
                         for scheduler in self.schedulers:
