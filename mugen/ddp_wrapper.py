@@ -20,6 +20,6 @@ class DDPWrapper(nn.Module):
 
     def forward(self, *args, **kwargs):
         if self.training:
-            self.training_module.training_step(*args, **kwargs)
+            return self.training_module.training_step(*args, **kwargs)
         else:
-            self.training_module.validation_step(*args, **kwargs)
+            return self.training_module.validation_step(*args, **kwargs)
