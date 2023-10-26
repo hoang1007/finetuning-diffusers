@@ -11,7 +11,7 @@ from mugen.utils.config_utils import init_from_config
 def load_config():
     config = OmegaConf.from_cli()
 
-    if 'config' in conf:
+    if 'config' in config:
         base_config = OmegaConf.load(config.config)
         config = OmegaConf.merge(base_config, config)
 
