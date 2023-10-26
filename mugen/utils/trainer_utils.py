@@ -6,6 +6,8 @@ import random
 import numpy as np
 import torch
 
+from accelerate import Accelerator
+
 
 def set_seed(seed: int):
     """
@@ -18,6 +20,16 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def is_using_gpu(accelerator: Accelerator):
+    """
+    Helper function to check if GPU is available.
+
+    Returns:
+        `bool`: `True` if GPU is available, `False` otherwise.
+    """
+    return accelerator.device.type == "cuda"
 
 
 PREFIX_CHECKPOINT_DIR = "checkpoint"

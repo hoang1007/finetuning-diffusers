@@ -13,7 +13,12 @@ from torch.nn import Parameter
 from accelerate.logging import get_logger
 from diffusers.optimization import get_scheduler
 
-from mugen.utils.trainer_utils import set_seed, get_last_checkpoint, prune_checkpoints
+from mugen.utils.trainer_utils import (
+    set_seed,
+    get_last_checkpoint,
+    prune_checkpoints,
+    is_using_gpu,
+)
 from mugen.ddp_wrapper import unwrap_model, DDPWrapper
 from mugen.hooks import HookHandler
 
@@ -75,13 +80,15 @@ class Trainer:
                     module_dropout=self.training_args.lora_module_dropout,
                     use_effective_conv2d=self.training_args.use_effective_conv2d,
                     target_modules=self.training_module.LORA_TARGET_MODULES,
-                    init_weights=True
-                )
+                    init_weights=True,
+                ),
             )
         # Wrap TrainingModule with DDPWrapper
         self.training_module = DDPWrapper(self.training_module)
 
-        num_trainable_params = sum(p.numel() for p in training_module.parameters() if p.requires_grad)
+        num_trainable_params = sum(
+            p.numel() for p in training_module.parameters() if p.requires_grad
+        )
         total_params = sum(p.numel() for p in training_module.parameters())
         print(f"NUM TRAINABLE PARAMETERS: {num_trainable_params:,}")
         print(f"TOTAL PARAMETERS: {total_params:,}")
@@ -182,7 +189,9 @@ class Trainer:
                 resume_step = resume_global_step % num_update_steps_per_epoch
 
         # Train!
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -218,7 +227,9 @@ class Trainer:
                             self.accelerator.backward(loss)
                             if self.training_args.max_grad_norm is not None:
                                 self.clip_grad_norm_(
-                                    unwrap_model(self.training_module).get_optim_params()[opt_idx],
+                                    unwrap_model(
+                                        self.training_module
+                                    ).get_optim_params()[opt_idx],
                                 )
                             opt.step()
                         for scheduler in self.schedulers:
@@ -230,8 +241,8 @@ class Trainer:
 
                         self.global_step += 1
 
-                        if self.global_step % self.training_args.save_steps == 0:
-                            if self.accelerator.is_main_process:
+                        if self.accelerator.is_main_process:
+                            if self.global_step % self.training_args.save_steps == 0:
                                 prune_checkpoints(
                                     self.training_args.output_dir,
                                     self.training_args.save_total_limit - 1,
@@ -243,12 +254,12 @@ class Trainer:
                                 self.accelerator.save_state(save_path)
                                 logger.info(f"Saved state to {save_path}")
 
-                        if (
-                            self.global_step
-                            % self.training_args.get_eval_steps(max_train_steps)
-                            == 0
-                        ):
-                            self._eval_loop()
+                            if (
+                                self.global_step
+                                % self.training_args.get_eval_steps(max_train_steps)
+                                == 0
+                            ):
+                                self._eval_loop()
 
                 if self.accelerator.is_main_process:
                     self.hook_handler.on_train_epoch_end()
@@ -257,13 +268,14 @@ class Trainer:
         self.accelerator.end_training()
 
     def _eval_loop(self):
+        old_train = self.training_module.training
+        self.training_module.eval()
         with tqdm(
             total=len(self.val_dataloader),
             disable=not self.accelerator.is_local_main_process,
         ) as progress_bar:
             progress_bar.set_description(f"Evaluating...")
 
-            self.training_module.eval()
             with torch.inference_mode():
                 self.hook_handler.on_validation_epoch_start()
                 for step, batch in enumerate(self.val_dataloader):
@@ -272,6 +284,10 @@ class Trainer:
 
                 if self.accelerator.is_main_process:
                     self.hook_handler.on_validation_epoch_end()
+        self.training_module.train(old_train)
+        if is_using_gpu(self.accelerator):
+            self.accelerator.print(f"\nGPU memory used for eval: {torch.cuda.memory_allocated() / 1024 ** 3:.2f} GB")
+            torch.cuda.empty_cache()
 
     def evaluate(self):
         self._eval_loop()
@@ -351,4 +367,6 @@ class Trainer:
 
     def clip_grad_norm_(self, parameters: Iterable[torch.nn.Parameter]):
         if self.accelerator.sync_gradients:
-            self.accelerator.clip_grad_norm_(parameters, self.training_args.max_grad_norm)
+            self.accelerator.clip_grad_norm_(
+                parameters, self.training_args.max_grad_norm
+            )
