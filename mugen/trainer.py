@@ -61,8 +61,6 @@ class Trainer:
         else:
             diffusers.utils.logging.set_verbosity_error()
 
-        self.accelerator.register_save_state_pre_hook(training_module.save_model_hook)
-        self.accelerator.register_load_state_pre_hook(training_module.load_model_hook)
 
         self.training_module = training_module
         self.training_module.register_trainer(self)
