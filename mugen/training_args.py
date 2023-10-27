@@ -62,7 +62,7 @@ class TrainingArguments:
         },
     )
     max_grad_norm: float = field(
-        default=1.0,
+        default=None,
         metadata={"help": "Max gradient norm"}
     )
 
@@ -167,6 +167,12 @@ class TrainingArguments:
     def __post_init__(self):
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
+        
+        if not os.path.exists(self.logging_dir):
+            os.makedirs(self.logging_dir)
+        
+        if self.overwrite_output_dir:
+            os.system(f"rm -rf {self.output_dir}/*")
 
     def get_warmup_steps(self, num_training_steps: int):
         warmup_steps = (
@@ -188,7 +194,9 @@ class TrainingArguments:
 
     def get_project_configuration(self):
         return ProjectConfiguration(
+            project_dir=self.output_dir,
             logging_dir=self.logging_dir,
+            automatic_checkpoint_naming=True,
             total_limit=self.save_total_limit,
         )
 

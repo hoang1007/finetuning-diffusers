@@ -61,7 +61,6 @@ class Trainer:
         else:
             diffusers.utils.logging.set_verbosity_error()
 
-
         self.training_module = training_module
         self.training_module.register_trainer(self)
 
@@ -165,7 +164,12 @@ class Trainer:
 
         if self.training_args.resume_from_checkpoint:
             if self.training_args.resume_from_checkpoint == "latest":
-                path = get_last_checkpoint(self.training_args.output_dir)
+                assert (
+                    self.accelerator.project_configuration.automatic_checkpoint_naming
+                ), "Automatic checkpoint naming must be enabled to use 'latest' checkpoint."
+                path = get_last_checkpoint(
+                    os.path.join(self.accelerator.project_dir, "checkpoints")
+                )
             else:
                 path = self.training_args.resume_from_checkpoint
 
@@ -175,7 +179,6 @@ class Trainer:
                 )
                 self.training_args.resume_from_checkpoint = None
             else:
-                self.accelerator.print(f"Loading checkpoint from {path}")
                 self.accelerator.load_state(path)
 
                 self.global_step = int(os.path.basename(path).split("-")[-1])
@@ -241,16 +244,19 @@ class Trainer:
 
                         if self.accelerator.is_main_process:
                             if self.global_step % self.training_args.save_steps == 0:
-                                prune_checkpoints(
-                                    self.training_args.output_dir,
-                                    self.training_args.save_total_limit - 1,
+                                # prune_checkpoints(
+                                #     self.training_args.output_dir,
+                                #     self.training_args.save_total_limit - 1,
+                                # )
+                                # save_path = os.path.join(
+                                #     self.training_args.output_dir,
+                                #     f"checkpoint-{self.global_step}",
+                                # )
+                                self.accelerator.save_state()
+                                unwrap_model(self.training_module).save_pretrained(
+                                    self.training_args.output_dir
                                 )
-                                save_path = os.path.join(
-                                    self.training_args.output_dir,
-                                    f"checkpoint-{self.global_step}",
-                                )
-                                self.accelerator.save_state(save_path)
-                                logger.info(f"Saved state to {save_path}")
+                                # logger.info(f"Saved state to {save_path}")
 
                             if (
                                 self.global_step
@@ -284,7 +290,9 @@ class Trainer:
                     self.hook_handler.on_validation_epoch_end()
         self.training_module.train(old_train)
         if is_using_gpu(self.accelerator):
-            self.accelerator.print(f"\nGPU memory used for eval: {torch.cuda.memory_allocated() / 1024 ** 3:.2f} GB")
+            self.accelerator.print(
+                f"\nGPU memory used for eval: {torch.cuda.memory_allocated() / 1024 ** 3:.2f} GB"
+            )
             torch.cuda.empty_cache()
 
     def evaluate(self):

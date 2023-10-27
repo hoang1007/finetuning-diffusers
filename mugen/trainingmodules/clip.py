@@ -50,13 +50,9 @@ class CLIPTrainingModule(TrainingModule):
             print('Feature extractor should not rescale images. Setting do_rescale to False')
             self.processor.image_processor.do_rescale = False
 
-        # self.metrics = {
-        #     'val/cosine_similarity': MeanMetric(),
-        #     'val/text2img_mean_rank': MeanMetric()
-        # }
         self.metrics = defaultdict(MeanMetric)
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int):
         imgs = batch[self.image_key]
         texts = batch[self.text_key]
         model_max_length = self.processor.tokenizer.model_max_length
@@ -101,13 +97,10 @@ class CLIPTrainingModule(TrainingModule):
             model_input[k] = model_input[k].to(self.device)
 
         model_output = self.model(**model_input, return_loss=True)
-        self.backward_loss(model_output.loss)
+        loss = model_output.loss
 
-        opt = optimizers[0]
-        opt.step()
-        opt.zero_grad()
-
-        self.log({"train/loss": model_output.loss.item()})
+        self.log({"train/loss": loss.item()})
+        return loss
 
     def validation_step(self, batch, batch_idx: int):
         imgs = batch[self.image_key]
@@ -148,23 +141,6 @@ class CLIPTrainingModule(TrainingModule):
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.model.parameters()]
 
-    def save_model_hook(self, models, weights, output_dir):
-        for i, model in enumerate(models):
-            model.model.save_pretrained(osp.join(output_dir, "text_encoder"))
-            weights.pop()
-
+    def save_pretrained(self, output_dir):
         self.processor.tokenizer.save_pretrained(osp.join(output_dir, "tokenizer"))
-
-    def load_model_hook(self, models, input_dir):
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = CLIPModel.from_pretrained(osp.join(input_dir, "text_encoder"))
-            # model.model.register_to_config(**load_model.config)
-
-            model.model.load_state_dict(load_model.state_dict())
-            del load_model
-
-        self.processor.tokenizer = CLIPTokenizer.from_pretrained(osp.join(input_dir, "tokenizer"))
+        self.model.save_pretrained(osp.join(output_dir, "text_encoder"))

@@ -117,41 +117,19 @@ class DDPMTrainingModule(TrainingModule):
         self.trainer.get_tracker().log_images(
             {
                 "original": org_imgs,
-                "generation": images,
+                "generated": images,
             }
         )
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.unet.parameters()]
 
-    def save_model_hook(self, models, weights, output_dir):
+    def save_pretrained(self, output_dir: str):
         if self.use_ema:
-            self.ema.save_pretrained(osp.join(output_dir, "unet_ema"))
+            self.ema.store(self.unet.parameters())
+            self.ema.copy_to(self.unet.parameters())
 
-        for i, model in enumerate(models):
-            model.unet.save_pretrained(osp.join(output_dir, "unet"))
-            weights.pop()
-        
-        self.noise_scheduler.save_pretrained(osp.join(output_dir, "scheduler"))
+        DDIMPipeline(self.unet, self.noise_scheduler).save_pretrained(output_dir)
 
-    def load_model_hook(self, models, input_dir):
         if self.use_ema:
-            load_model = EMAModel.from_pretrained(
-                osp.join(input_dir, "unet_ema"), UNet2DModel
-            )
-            self.ema.load_state_dict(load_model.state_dict())
-            self.ema.to(self.device)
-            del load_model
-
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = UNet2DModel.from_pretrained(input_dir, subfolder="unet")
-            model.unet.register_to_config(**load_model.config)
-
-            model.unet.load_state_dict(load_model.state_dict())
-            del load_model
-        
-        self.noise_scheduler.from_pretrained(input_dir, subfolder="scheduler")
+            self.ema.restore(self.unet.parameters())
