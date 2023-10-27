@@ -1,0 +1,25 @@
+name: Code check
+
+on:
+  push:
+    branches: [main, "release/*"]
+  pull_request:
+    branches: [main, "release/*"]
+
+jobs:
+  codecov:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+
+    - name: Codecov
+      uses: codecov/codecov-action@v3.1.4
+
+      env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  
