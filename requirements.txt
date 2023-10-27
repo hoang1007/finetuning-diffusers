@@ -1,8 +1,7 @@
 omegaconf==2.3.0
-librosa==0.10.1
 torch==2.0.1
 torchvision==0.15.2
 transformers==4.33.2
-diffusers[torch]==0.20.2
+diffusers==0.20.2
 accelerate==0.23.0
 datasets==2.14.5

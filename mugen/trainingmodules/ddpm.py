@@ -60,7 +60,7 @@ class DDPMTrainingModule(TrainingModule):
         if self.use_ema:
             self.ema.to(self.device)
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int):
         x = batch[self.input_key]
         cond = batch.get(self.conditional_key, None)
         noise = torch.randn_like(x)
@@ -76,15 +76,9 @@ class DDPMTrainingModule(TrainingModule):
 
         # predict the noise
         loss = F.mse_loss(unet_output, noise)
-        self.backward_loss(loss)
-
-        if self.trainer.accelerator.sync_gradients:
-            self.trainer.accelerator.clip_grad_norm_(self.unet.parameters(), 1.0)
-        opt = optimizers[0]
-        opt.step()
-        opt.zero_grad()
-
         self.log({"train/loss": loss.item()})
+
+        return loss
 
     def on_train_batch_end(self):
         if self.use_ema:

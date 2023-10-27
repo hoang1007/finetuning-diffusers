@@ -4,16 +4,17 @@ from typing import List, Iterable
 from tqdm import tqdm
 
 import torch
+from mugen.hooks import BaseHook
 
 if TYPE_CHECKING:
     from mugen import Trainer
     from torch.optim import Optimizer
 
 
-class TrainingModule(torch.nn.Module):
+class TrainingModule(torch.nn.Module, BaseHook):
     LORA_TARGET_MODULES = None
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int) -> torch.Tensor:
         raise NotImplementedError
 
     def validation_step(self, batch, batch_idx: int):
@@ -24,30 +25,6 @@ class TrainingModule(torch.nn.Module):
 
     def backward_loss(self, loss: torch.Tensor):
         self.trainer.accelerator.backward(loss)
-
-    def on_start(self):
-        pass
-
-    def on_end(self):
-        pass
-
-    def on_train_batch_start(self):
-        pass
-
-    def on_train_batch_end(self):
-        pass
-
-    def on_train_epoch_start(self):
-        pass
-
-    def on_train_epoch_end(self):
-        pass
-
-    def on_validation_epoch_start(self):
-        pass
-
-    def on_validation_epoch_end(self):
-        pass
 
     def clip_grad_norm_(self, parameters: Iterable[torch.nn.Parameter]):
         self.trainer.clip_grad_norm_(parameters)

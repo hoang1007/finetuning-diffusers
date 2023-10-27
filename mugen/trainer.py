@@ -13,7 +13,14 @@ from torch.nn import Parameter
 from accelerate.logging import get_logger
 from diffusers.optimization import get_scheduler
 
-from mugen.utils.trainer_utils import set_seed, get_last_checkpoint, prune_checkpoints
+from mugen.utils.trainer_utils import (
+    set_seed,
+    get_last_checkpoint,
+    prune_checkpoints,
+    is_using_gpu,
+)
+from mugen.ddp_wrapper import unwrap_model, DDPWrapper
+from mugen.hooks import HookHandler
 
 if TYPE_CHECKING:
     from mugen import TrainingArguments
@@ -54,8 +61,6 @@ class Trainer:
         else:
             diffusers.utils.logging.set_verbosity_error()
 
-        self.accelerator.register_save_state_pre_hook(training_module.save_model_hook)
-        self.accelerator.register_load_state_pre_hook(training_module.load_model_hook)
 
         self.training_module = training_module
         self.training_module.register_trainer(self)
@@ -73,11 +78,15 @@ class Trainer:
                     module_dropout=self.training_args.lora_module_dropout,
                     use_effective_conv2d=self.training_args.use_effective_conv2d,
                     target_modules=self.training_module.LORA_TARGET_MODULES,
-                    init_weights=True
-                )
+                    init_weights=True,
+                ),
             )
+        # Wrap TrainingModule with DDPWrapper
+        self.training_module = DDPWrapper(self.training_module)
 
-        num_trainable_params = sum(p.numel() for p in training_module.parameters() if p.requires_grad)
+        num_trainable_params = sum(
+            p.numel() for p in training_module.parameters() if p.requires_grad
+        )
         total_params = sum(p.numel() for p in training_module.parameters())
         print(f"NUM TRAINABLE PARAMETERS: {num_trainable_params:,}")
         print(f"TOTAL PARAMETERS: {total_params:,}")
@@ -87,7 +96,7 @@ class Trainer:
 
         self.optimizers = [
             self.create_optimizer(params)
-            for params in self.training_module.get_optim_params()
+            for params in unwrap_model(self.training_module).get_optim_params()
         ]
 
         num_training_steps = len(self.train_dataloader) * self.training_args.num_epochs
@@ -123,6 +132,9 @@ class Trainer:
                     self.training_args.logger: self.training_args.tracker_init_kwargs
                 },
             )
+
+        self.hook_handler = HookHandler()
+        self.hook_handler.register_hook(unwrap_model(self.training_module))
 
     def start(self):
         total_batch_size = (
@@ -175,22 +187,24 @@ class Trainer:
                 resume_step = resume_global_step % num_update_steps_per_epoch
 
         # Train!
-        import gc; gc.collect()
+        import gc
+
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        self.training_module.on_start()
+        self.hook_handler.on_start()
         for epoch in range(first_epoch, self.training_args.num_epochs):
             with tqdm(
                 total=num_update_steps_per_epoch,
                 disable=not self.accelerator.is_local_main_process,
                 dynamic_ncols=True,
             ) as progress_bar:
-                self.training_module.register_progress_bar(progress_bar)
+                unwrap_model(self.training_module).register_progress_bar(progress_bar)
                 progress_bar.set_description(f"Epoch {epoch}")
 
                 self.training_module.train()
-                self.training_module.on_train_epoch_start()
+                self.hook_handler.on_train_epoch_start()
                 for step, batch in enumerate(self.train_dataloader):
                     # Skip steps until we reach the resumed step
                     if (
@@ -202,21 +216,31 @@ class Trainer:
                             progress_bar.update(1)
                         continue
 
-                    self.training_module.on_train_batch_start()
+                    self.hook_handler.on_train_batch_start()
 
                     with self.accelerator.accumulate(self.training_module):
-                        self.training_module.training_step(batch, self.optimizers, step)
+                        for opt_idx, opt in enumerate(self.optimizers):
+                            opt.zero_grad()
+                            loss = self.training_module(batch, step, opt_idx)
+                            self.accelerator.backward(loss)
+                            if self.training_args.max_grad_norm is not None:
+                                self.clip_grad_norm_(
+                                    unwrap_model(
+                                        self.training_module
+                                    ).get_optim_params()[opt_idx],
+                                )
+                            opt.step()
                         for scheduler in self.schedulers:
                             scheduler.step()
 
                     if self.accelerator.sync_gradients:
-                        self.training_module.on_train_batch_end()
+                        self.hook_handler.on_train_batch_end()
                         progress_bar.update(1)
 
                         self.global_step += 1
 
-                        if self.global_step % self.training_args.save_steps == 0:
-                            if self.accelerator.is_main_process:
+                        if self.accelerator.is_main_process:
+                            if self.global_step % self.training_args.save_steps == 0:
                                 prune_checkpoints(
                                     self.training_args.output_dir,
                                     self.training_args.save_total_limit - 1,
@@ -228,35 +252,40 @@ class Trainer:
                                 self.accelerator.save_state(save_path)
                                 logger.info(f"Saved state to {save_path}")
 
-                        if (
-                            self.global_step
-                            % self.training_args.get_eval_steps(max_train_steps)
-                            == 0
-                        ):
-                            self._eval_loop()
+                            if (
+                                self.global_step
+                                % self.training_args.get_eval_steps(max_train_steps)
+                                == 0
+                            ):
+                                self._eval_loop()
 
                 if self.accelerator.is_main_process:
-                    self.training_module.on_train_epoch_end()
+                    self.hook_handler.on_train_epoch_end()
 
             self.accelerator.wait_for_everyone()
         self.accelerator.end_training()
 
     def _eval_loop(self):
+        old_train = self.training_module.training
+        self.training_module.eval()
         with tqdm(
             total=len(self.val_dataloader),
             disable=not self.accelerator.is_local_main_process,
         ) as progress_bar:
             progress_bar.set_description(f"Evaluating...")
 
-            self.training_module.eval()
             with torch.inference_mode():
-                self.training_module.on_validation_epoch_start()
+                self.hook_handler.on_validation_epoch_start()
                 for step, batch in enumerate(self.val_dataloader):
-                    self.training_module.validation_step(batch, step)
+                    self.training_module(batch, step)
                     progress_bar.update(1)
 
                 if self.accelerator.is_main_process:
-                    self.training_module.on_validation_epoch_end()
+                    self.hook_handler.on_validation_epoch_end()
+        self.training_module.train(old_train)
+        if is_using_gpu(self.accelerator):
+            self.accelerator.print(f"\nGPU memory used for eval: {torch.cuda.memory_allocated() / 1024 ** 3:.2f} GB")
+            torch.cuda.empty_cache()
 
     def evaluate(self):
         self._eval_loop()
@@ -336,4 +365,6 @@ class Trainer:
 
     def clip_grad_norm_(self, parameters: Iterable[torch.nn.Parameter]):
         if self.accelerator.sync_gradients:
-            self.accelerator.clip_grad_norm_(parameters, self.training_args.max_grad_norm)
+            self.accelerator.clip_grad_norm_(
+                parameters, self.training_args.max_grad_norm
+            )
