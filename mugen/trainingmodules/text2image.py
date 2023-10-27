@@ -108,7 +108,7 @@ class Text2ImageTrainingModule(TrainingModule):
         if self.use_ema:
             self.ema.to(self.device)
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int):
         x = batch[self.input_key] * self.vae_config.scaling_factor
         cond = batch[self.conditional_key]
         noise = torch.randn_like(x)
@@ -124,13 +124,9 @@ class Text2ImageTrainingModule(TrainingModule):
 
         # predict the noise
         loss = F.mse_loss(unet_output, noise)
-        self.backward_loss(loss)
-
-        opt = optimizers[0]
-        opt.step()
-        opt.zero_grad()
-
         self.log({"train/loss": loss.item()})
+
+        return loss
 
     def on_train_batch_end(self):
         if self.use_ema:
@@ -172,37 +168,15 @@ class Text2ImageTrainingModule(TrainingModule):
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.unet.parameters()]
 
-    def save_model_hook(self, models, weights, output_dir):
+    def save_pretrained(self, output_dir: str):
         if self.use_ema:
-            self.ema.save_pretrained(osp.join(output_dir, "unet_ema"))
+            self.ema.store(self.unet.parameters())
+            self.ema.copy_to(self.unet.parameters())
 
-        for i, model in enumerate(models):
-            model.unet.save_pretrained(osp.join(output_dir, "unet"))
-            weights.pop()
+        self.get_pipeline().save_pretrained(output_dir)
 
-        self.noise_scheduler.save_pretrained(osp.join(output_dir, "scheduler"))
-
-    def load_model_hook(self, models, input_dir):
         if self.use_ema:
-            load_model = EMAModel.from_pretrained(
-                osp.join(input_dir, "unet_ema"), UNet2DConditionModel
-            )
-            self.ema.load_state_dict(load_model.state_dict())
-            self.ema.to(self.device)
-            del load_model
-
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
-            model.unet.register_to_config(**load_model.config)
-
-            model.unet.load_state_dict(load_model.state_dict())
-            del load_model
-
-        self.noise_scheduler.from_pretrained(input_dir, subfolder="scheduler")
+            self.ema.restore(self.unet.parameters())
 
     def get_pipeline(self):
         if self.vae_pretrained_name_or_path:

@@ -2,7 +2,6 @@ from typing import List, Optional, Iterable
 import os.path as osp
 
 import torch
-from torch.optim import Optimizer
 
 from .base import TrainingModule
 from mugen.losses import LPIPSWithDiscriminator
@@ -12,19 +11,13 @@ from diffusers.models import AutoencoderKL
 from diffusers.training_utils import EMAModel
 
 
-class FreezeGradient:
-    def __init__(self, module: torch.nn.Module):
-        self.module = module
+def freeze(module: torch.nn.Module):
+    module.eval()
+    module.requires_grad_(False)
 
-    def __enter__(self):
-        self.state = self.module.training
-        self.module.train(False)
-        self.module.requires_grad_(False)
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.module.requires_grad_(True)
-        self.module.train(self.state)
+def unfreeze(module: torch.nn.Module):
+    module.requires_grad_(True)
+    module.train()
 
 
 class VAETrainingModule(TrainingModule):
@@ -72,45 +65,29 @@ class VAETrainingModule(TrainingModule):
     def get_last_layer(self):
         return self.vae.decoder.conv_out.weight
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int):
         x = batch[self.input_key]
         latent_dist = self.vae.encode(x).latent_dist
         x_recon = self.vae.decode(latent_dist.sample()).sample
 
-        vae_opt, disc_opt = optimizers
-        # Train VAE
-        with FreezeGradient(self.loss_fn.discriminator):
-            ae_loss, log_dict_ae = self.loss_fn(
-                x,
-                x_recon,
-                latent_dist,
-                0,
-                self.global_step,
-                self.get_last_layer(),
-                split="train",
-            )
-            self.backward_loss(ae_loss)
-            vae_opt.step()
-            vae_opt.zero_grad()
+        if optimizer_idx == 0:
+            freeze(self.loss_fn.discriminator)
+            unfreeze(self.vae.encoder)
+        elif optimizer_idx == 1:
+            freeze(self.vae.encoder)
+            unfreeze(self.loss_fn.discriminator)
 
-        # Train discriminator
-        with FreezeGradient(self.vae):
-            disc_loss, log_dict_disc = self.loss_fn(
-                x,
-                x_recon,
-                latent_dist,
-                1,
-                self.global_step,
-                self.get_last_layer(),
-                split="train",
-            )
-            self.backward_loss(disc_loss)
-            disc_opt.step()
-            disc_opt.zero_grad()
-
-        log_dict = {**log_dict_ae, **log_dict_disc}
-        self.log(log_dict, progess_bar=False, logger=True)
-        self.log({"ae_loss": ae_loss.item()}, progess_bar=True, logger=False)
+        loss, log_dict = self.loss_fn(
+            x,
+            x_recon,
+            latent_dist,
+            optimizer_idx,
+            self.global_step,
+            self.get_last_layer(),
+            split="train",
+        )
+        self.log(log_dict)
+        return loss
 
     def on_train_batch_end(self):
         if self.use_ema:
@@ -147,30 +124,12 @@ class VAETrainingModule(TrainingModule):
             self.loss_fn.discriminator.parameters()
         ]
 
-    def save_model_hook(self, models, weights, output_dir):
+    def save_pretrained(self, output_dir: str):
         if self.use_ema:
-            self.ema.save_pretrained(osp.join(output_dir, "vae_ema"))
+            self.ema.store(self.vae.parameters())
+            self.ema.copy_to(self.vae.parameters())
 
-        for i, model in enumerate(models):
-            model.vae.save_pretrained(osp.join(output_dir, f"vae"))
-            weights.pop()
+        self.vae.save_pretrained(output_dir)
 
-    def load_model_hook(self, models, input_dir):
         if self.use_ema:
-            load_model = EMAModel.from_pretrained(
-                osp.join(input_dir, "vae_ema"), AutoencoderKL
-            )
-            self.ema.load_state_dict(load_model.state_dict())
-            self.ema.to(self.device)
-            del load_model
-
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = AutoencoderKL.from_pretrained(input_dir, subfolder="vae")
-            model.vae.register_to_config(**load_model.config)
-
-            model.vae.load_state_dict(load_model.state_dict())
-            del load_model
+            self.ema.restore(self.vae.parameters())
