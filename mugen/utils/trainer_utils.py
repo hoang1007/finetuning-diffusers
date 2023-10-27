@@ -33,10 +33,13 @@ def is_using_gpu(accelerator: Accelerator):
 
 
 PREFIX_CHECKPOINT_DIR = "checkpoint"
-_re_checkpoint = re.compile(r"^" + PREFIX_CHECKPOINT_DIR + r"\-(\d+)$")
+_re_checkpoint = re.compile(r"^" + PREFIX_CHECKPOINT_DIR + r"\_(\d+)$")
 
 
-def get_last_checkpoint(folder: str):
+def get_latest_checkpoint(folder: str):
+    if not os.path.exists(folder) or not os.path.isdir(folder):
+        return
+
     content = os.listdir(folder)
     checkpoints = [
         path

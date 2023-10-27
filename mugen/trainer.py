@@ -15,7 +15,7 @@ from diffusers.optimization import get_scheduler
 
 from mugen.utils.trainer_utils import (
     set_seed,
-    get_last_checkpoint,
+    get_latest_checkpoint,
     prune_checkpoints,
     is_using_gpu,
 )
@@ -167,7 +167,7 @@ class Trainer:
                 assert (
                     self.accelerator.project_configuration.automatic_checkpoint_naming
                 ), "Automatic checkpoint naming must be enabled to use 'latest' checkpoint."
-                path = get_last_checkpoint(
+                path = get_latest_checkpoint(
                     os.path.join(self.accelerator.project_dir, "checkpoints")
                 )
             else:
@@ -179,9 +179,10 @@ class Trainer:
                 )
                 self.training_args.resume_from_checkpoint = None
             else:
+                self.accelerator.print(f"Loading checkpoint from {path}")
                 self.accelerator.load_state(path)
 
-                self.global_step = int(os.path.basename(path).split("-")[-1])
+                self.global_step = int(os.path.basename(path).split("_")[-1])
 
                 resume_global_step = (
                     self.global_step * self.training_args.gradient_accumulation_steps
