@@ -17,9 +17,14 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
 
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run tests and collect coverage
+      run: pytest --cov .
+
     - name: Codecov
       uses: codecov/codecov-action@v3.1.4
-
       env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   
