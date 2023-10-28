@@ -163,7 +163,7 @@ class Text2ImageTrainingModule(TrainingModule):
         if self.use_ema:
             self.ema.restore(self.unet.parameters())
 
-        self.trainer.get_tracker().log_images({"generated": gen_images, "real": real_images})
+        self.log_images({"generated": gen_images, "real": real_images})
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.unet.parameters()]

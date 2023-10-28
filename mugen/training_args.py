@@ -111,7 +111,7 @@ class TrainingArguments:
     ema_max_decay: float = field(default=0.9999, metadata={"help": "EMA max decay."})
 
     logger: Literal["tensorboard", "wandb"] = field(
-        default="wandb", metadata={"help": "Logger to use."}
+        default=None, metadata={"help": "Logger to use. Default: None (no logger)."}
     )
 
     local_rank: int = field(
@@ -141,9 +141,7 @@ class TrainingArguments:
         default=False, metadata={"help": "Use parameter effective decomposition for Conv2d 3x3 with ksize > 1."}
     )
 
-    save_steps: int = (
-        field(default=500, metadata={"help": "Save checkpoint every X updates steps."}),
-    )
+    save_steps: int = field(default=500, metadata={"help": "Save checkpoint every X updates steps."})
     save_total_limit: Optional[int] = field(
         default=None, metadata={"help": "Limit the total amount of checkpoints."}
     )

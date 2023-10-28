@@ -244,20 +244,14 @@ class Trainer:
                         self.global_step += 1
 
                         if self.accelerator.is_main_process:
-                            if self.global_step % self.training_args.save_steps == 0:
-                                # prune_checkpoints(
-                                #     self.training_args.output_dir,
-                                #     self.training_args.save_total_limit - 1,
-                                # )
-                                # save_path = os.path.join(
-                                #     self.training_args.output_dir,
-                                #     f"checkpoint-{self.global_step}",
-                                # )
+                            if (
+                                self.global_step % self.training_args.save_steps == 0
+                                or self.global_step == max_train_steps
+                            ):
                                 self.accelerator.save_state()
                                 unwrap_model(self.training_module).save_pretrained(
                                     self.training_args.output_dir
                                 )
-                                # logger.info(f"Saved state to {save_path}")
 
                             if (
                                 self.global_step
@@ -300,7 +294,8 @@ class Trainer:
         self._eval_loop()
 
     def get_tracker(self, unwrap: bool = False):
-        return self.accelerator.get_tracker(self.training_args.logger, unwrap)
+        if self.training_args.logger is not None:
+            return self.accelerator.get_tracker(self.training_args.logger, unwrap)
 
     def create_optimizer(self, parameters: Iterable[Parameter]):
         if (

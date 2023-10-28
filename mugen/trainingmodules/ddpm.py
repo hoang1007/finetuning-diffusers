@@ -114,7 +114,7 @@ class DDPMTrainingModule(TrainingModule):
 
         org_imgs = (x.detach() / 2 + 0.5).cpu().permute(0, 2, 3, 1).numpy()
 
-        self.trainer.get_tracker().log_images(
+        self.log_images(
             {
                 "original": org_imgs,
                 "generated": images,

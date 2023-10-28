@@ -139,7 +139,7 @@ class LDMTrainingModule(TrainingModule):
         if self.use_ema:
             self.ema.restore(self.unet.parameters())
 
-        self.trainer.get_tracker().log_images({"generated": images})
+        self.log_images({"generated": images})
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
         return [self.unet.parameters()]

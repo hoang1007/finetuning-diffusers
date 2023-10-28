@@ -110,7 +110,7 @@ class VAETrainingModule(TrainingModule):
         x_gen = self.vae.decode(torch.randn_like(z)).sample
 
         to_np_images = lambda x: (x.detach() / 2 + 0.5).clamp(0, 1).permute(0, 2, 3, 1).float().cpu().numpy()
-        self.trainer.get_tracker().log_images(
+        self.log_images(
             {
                 "original": to_np_images(x),
                 "reconstruction": to_np_images(x_recon),
