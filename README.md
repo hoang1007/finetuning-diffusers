@@ -1,3 +1,6 @@
+[![codecov](https://codecov.io/gh/hoang1007/finetuning-diffusers/graph/badge.svg?token=S7VKN050RD)](https://codecov.io/gh/hoang1007/finetuning-diffusers)
+[![CodeQL](https://github.com/hoang1007/finetuning-diffusers/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/hoang1007/finetuning-diffusers/actions/workflows/github-code-scanning/codeql)
+
 Finetuning-diffusers aim to provide a simple way to finetune pretrained diffusion models on your own data. This repository is built on top of [diffusers](https://github.com/huggingface/diffusers.git), is designed to be easy to use and maximize customizability.
 
 Our project is highly insprired by [HuggingFace Transformers](https://github.com/huggingface/transformers.git) and [PyTorch Lightning](https://github.com/Lightning-AI/lightning.git).
@@ -43,7 +46,8 @@ class DDPMTrainingModule(TrainingModule):
     
         self.noise_scheduler = DDIMScheduler.from_pretrained(pretrained_name_or_path, subfolder="scheduler")
 
-    def training_step(self, batch, optimizers: List[Optimizer], batch_idx: int):
+    def training_step(self, batch, batch_idx: int, optimizer_idx: int):
+        """This function calculate the loss of the model to optimize"""
         x = batch
         noise = torch.randn_like(x)
         timesteps = torch.randint(
@@ -56,15 +60,10 @@ class DDPMTrainingModule(TrainingModule):
         noisy_x = self.noise_scheduler.add_noise(x, noise, timesteps)
         unet_output = self.unet(noisy_x, timesteps).sample
 
-        # predict the noise
         loss = F.mse_loss(unet_output, noise)
-        self.backward_loss(loss)
-
-        opt = optimizers[0]
-        opt.step()
-        opt.zero_grad()
-
         self.log({"train/loss": loss.item()})
+
+        return loss
     
     def on_validation_epoch_start(self):
         self.random_batch_idx = torch.randint(
@@ -87,7 +86,7 @@ class DDPMTrainingModule(TrainingModule):
 
         org_imgs = (x.detach() / 2 + 0.5).cpu().permute(0, 2, 3, 1).numpy()
 
-        self.trainer.get_tracker().log_images(
+        self.log_images(
             {
                 "original": org_imgs,
                 "generated": images,
@@ -95,47 +94,21 @@ class DDPMTrainingModule(TrainingModule):
         )
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
+        """Return a list of param group. Each group will be handled by an optimizer"""
         return [self.unet.parameters()]
 
-    def save_model_hook(self, models, weights, output_dir):
-        if self.use_ema:
-            self.ema.save_pretrained(osp.join(output_dir, "unet_ema"))
+    def save_pretrained(self, output_dir):
+        """Save model's weights to load later"""
+        DDIMPipeline(self.unet, self.noise_scheduler).save_pretrained(output_dir)
 
-        for i, model in enumerate(models):
-            model.unet.save_pretrained(osp.join(output_dir, "unet"))
-            weights.pop()
-        
-        self.noise_scheduler.save_pretrained(osp.join(output_dir, "scheduler"))
-
-    def load_model_hook(self, models, input_dir):
-        if self.use_ema:
-            load_model = EMAModel.from_pretrained(
-                osp.join(input_dir, "unet_ema"), UNet2DModel
-            )
-            self.ema.load_state_dict(load_model.state_dict())
-            self.ema.to(self.device)
-            del load_model
-
-        for i in range(len(models)):
-            # pop models so that they are not loaded again
-            model = models.pop()
-
-            # load diffusers style into model
-            load_model = UNet2DModel.from_pretrained(input_dir, subfolder="unet")
-            model.unet.register_to_config(**load_model.config)
-
-            model.unet.load_state_dict(load_model.state_dict())
-            del load_model
-        
-        self.noise_scheduler.from_pretrained(input_dir, subfolder="scheduler")
 ```
 Our `TrainingModule` is designed to familiar with `Pytorch LightningModule`. For more details, please take a look at [TrainingModule API](mugen/trainingmodules/base.py)
 
 Currently, we already implemented some `TrainingModule` to training diffusion tasks:
 - [DDPMTrainingModule](mugen/trainingmodules/ddpm.py): For unconditional image generation.
 - [CLIPTrainingModule](mugen/trainingmodules/clip.py): Training CLIP text model for text2image generation.
-- [VAETrainingModule](mugen/trainingmodules/vae.py): Training VAE model for image2image generation.
-- [Text2ImageTrainingModule](mugen/trainingmodules/text2image.py): For text2image generation.
+- [VAETrainingModule](mugen/trainingmodules/vae.py): Training VAE model.
+- [Text2ImageTrainingModule](mugen/trainingmodules/text2image.py): For training Stable Diffusion.
 
 ## `DataModule`:
 `DataModule` is a base class that prepare data for training and evaluation step.
