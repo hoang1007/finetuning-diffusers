@@ -1,4 +1,5 @@
 from __future__ import annotations
+from warnings import warn
 from typing import TYPE_CHECKING
 from typing import List, Iterable
 from tqdm import tqdm
@@ -44,29 +45,30 @@ class TrainingModule(torch.nn.Module, BaseHook):
         raise NotImplementedError
 
     @property
-    def trainer(self) -> Trainer:
+    def trainer(self):
         """
         The trainer object.
         """
-        return self._trainer
+        return self._trainer if hasattr(self, "_trainer") else None
 
     @property
     def progress_bar(self):
         """
         Progress bar for the current epoch.
         """
-        return self._progess_bar
+        return self._progess_bar if hasattr(self, "_progess_bar") else None
 
     @property
     def global_step(self):
         """
         The current global step.
         """
-        return self.trainer.global_step
+        return self.trainer.global_step if self.trainer is not None else None
 
     @property
     def device(self):
-        return self.trainer.accelerator.device
+        device = next(self.parameters()).device
+        return device
 
     def log(self, values: dict, logger: bool = True, progess_bar: bool = True):
         """
@@ -77,11 +79,38 @@ class TrainingModule(torch.nn.Module, BaseHook):
             logger: Whether to log to the logger.
             progess_bar: Whether to log to the progess bar.
         """
+        if self.trainer is None:
+            warn("No trainer is registered to the training module!")
+            return
+
         if self.trainer.accelerator.is_main_process:
             if progess_bar:
-                self.progress_bar.set_postfix(values)
-            if logger and self.trainer.accelerator.is_main_process:
+                if self.progress_bar is not None:
+                    self.progress_bar.set_postfix(values)
+                else:
+                    self.trainer.accelerator.print("No progess bar found. Skipping progess bar logging.")
+            if logger:
                 self.trainer.accelerator.log(values, step=self.global_step)
+    
+    def log_images(self, images: dict):
+        """
+        Log images for the current step to the logger.
+
+        Args:
+            images: Dictionary of images to log.
+        """
+        if self.trainer is None:
+            warn("No trainer is registered to the training module!")
+            return
+
+        if self.trainer.accelerator.is_main_process:
+            tracker = self.trainer.get_tracker()
+            if tracker is None:
+                self.trainer.accelerator.print("No tracker found. Skipping image logging.")
+            elif hasattr(tracker, "log_images"):
+                tracker.log_images(images, step=self.global_step)
+            else:
+                self.trainer.accelerator.print(f"Tracker {tracker.__class__.__name__} does not support image logging.")
 
     def register_trainer(self, trainer: Trainer):
         self._trainer = trainer
