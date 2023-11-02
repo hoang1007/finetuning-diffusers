@@ -27,15 +27,14 @@ def load_config():
 
 def main(config: dict):
     training_args = TrainingArguments(**config['training_args'])
-    datamodule: BaseDataModule = init_from_config(config['datamodule'])
+    data_module: BaseDataModule = init_from_config(config['datamodule'])
     training_module: TrainingModule = init_from_config(config['training_module'])
 
     trainer = Trainer(
-        "finetuning-diffusers",
-        training_module,
-        training_args,
-        datamodule.get_training_dataset(),
-        datamodule.get_validation_dataset(),
+        project_name="finetuning-diffusers",
+        training_module=training_module,
+        training_args=training_args,
+        data_module=data_module
     )
     trainer.get_tracker().store_init_configuration(config)
     trainer.start()
