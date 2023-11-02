@@ -3,8 +3,10 @@ from datasets import load_dataset
 
 from torchvision import transforms
 
+from .base import BaseDataModule
 
-class ImageDataModule:
+
+class ImageDataModule(BaseDataModule):
     def __init__(
         self,
         data_path: Optional[str] = None,
@@ -19,40 +21,53 @@ class ImageDataModule:
         random_flip: bool = True,
         center_normalize: bool = True,
     ):
+        self.data_path = data_path
+        self.data_name = data_name
+        self.cache_dir = cache_dir
+        self.train_split = train_split
+        self.val_split = val_split
+        self.image_column = image_column
+        self.caption_column = caption_column
+        self.resolution = resolution
+        self.center_crop = center_crop
+        self.random_flip = random_flip
+        self.center_normalize = center_normalize
+
+    def setup(self):
         self.train_data = load_dataset(
-            data_path,
-            name=data_name,
-            cache_dir=cache_dir,
-            split=train_split,
+            self.data_path,
+            name=self.data_name,
+            cache_dir=self.cache_dir,
+            split=self.train_split,
         )
 
         self.val_data = load_dataset(
-            data_path,
-            name=data_name,
-            cache_dir=cache_dir,
-            split=val_split,
+            self.data_path,
+            name=self.data_name,
+            cache_dir=self.cache_dir,
+            split=self.val_split,
         )
 
         augs = transforms.Compose(
             [
-                transforms.Resize(resolution, transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(resolution)
-                if center_crop
-                else transforms.RandomCrop(resolution),
+                transforms.Resize(self.resolution, transforms.InterpolationMode.BILINEAR),
+                transforms.CenterCrop(self.resolution)
+                if self.center_crop
+                else transforms.RandomCrop(self.resolution),
                 transforms.RandomHorizontalFlip()
-                if random_flip
+                if self.random_flip
                 else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]) if center_normalize else transforms.Lambda(lambda x: x),
+                transforms.Normalize([0.5], [0.5]) if self.center_normalize else transforms.Lambda(lambda x: x),
             ]
         )
 
         def transform_images(examples):
-            images = [augs(image.convert('RGB')) for image in examples[image_column]]
+            images = [augs(image.convert('RGB')) for image in examples[self.image_column]]
             ret = {'image': images}
 
-            if caption_column is not None:
-                ret['caption'] = examples[caption_column]
+            if self.caption_column is not None:
+                ret['caption'] = examples[self.caption_column]
 
             return ret
 
