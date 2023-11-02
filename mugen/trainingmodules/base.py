@@ -63,7 +63,7 @@ class TrainingModule(torch.nn.Module, BaseHook):
         """
         The current global step.
         """
-        return self.trainer.global_step if self.trainer is not None else None
+        return self.trainer.global_step if self.trainer is not None else 0
 
     @property
     def device(self):
@@ -91,7 +91,7 @@ class TrainingModule(torch.nn.Module, BaseHook):
                     self.trainer.accelerator.print("No progess bar found. Skipping progess bar logging.")
             if logger:
                 self.trainer.accelerator.log(values, step=self.global_step)
-    
+
     def log_images(self, images: dict):
         """
         Log images for the current step to the logger.

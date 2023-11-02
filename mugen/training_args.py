@@ -194,7 +194,6 @@ class TrainingArguments:
         return ProjectConfiguration(
             project_dir=self.output_dir,
             logging_dir=self.logging_dir,
-            automatic_checkpoint_naming=True,
             total_limit=self.save_total_limit,
         )
 

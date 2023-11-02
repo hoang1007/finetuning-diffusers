@@ -34,6 +34,8 @@ def test_get_data(
         val_split=val_split,
         resolution=resolution,
     )
+    dtm.prepare_data()
+    dtm.setup()
 
     assert dtm.get_training_dataset() is not None
     assert dtm.get_validation_dataset() is not None
