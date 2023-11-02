@@ -1,9 +1,7 @@
-from typing import List, Optional, Iterable
-import os.path as osp
+from typing import List, Optional, Iterable, Literal
 
 import torch
 import torch.nn.functional as F
-from torch.optim import Optimizer
 
 from .base import TrainingModule
 from omegaconf import DictConfig
@@ -45,6 +43,8 @@ class Text2ImageTrainingModule(TrainingModule):
         feature_extractor_pretrained_name_or_path: Optional[str] = None,
         input_key: str = "latent",
         conditional_key: str = "text_embedding",
+        snr_gamma: Optional[float] = None,
+        prediction_type: Optional[Literal['epsilon', 'v_prediction']] = None,
         use_ema: bool = True,
         enable_xformers_memory_efficient_attention: bool = False,
         enable_gradient_checkpointing: bool = False,
@@ -63,6 +63,7 @@ class Text2ImageTrainingModule(TrainingModule):
         self.feature_extractor_pretrained_name_or_path = feature_extractor_pretrained_name_or_path
         self.scheduler_pretrained_name_or_path = scheduler_pretrained_name_or_path
         self.run_safety_checker = run_safety_checker
+        self.snr_gamma = snr_gamma
 
         self.enable_xformers_memory_efficient_attention = (
             enable_xformers_memory_efficient_attention
@@ -87,6 +88,9 @@ class Text2ImageTrainingModule(TrainingModule):
             )
         else:
             raise ValueError("Either `scheduler_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!")
+
+        if prediction_type is not None:
+            self.noise_scheduler.register_to_config(prediction_type=prediction_type)
 
         if self.enable_xformers_memory_efficient_attention:
             self.unet.enable_xformers_memory_efficient_attention()
@@ -121,9 +125,28 @@ class Text2ImageTrainingModule(TrainingModule):
 
         noisy_x = self.noise_scheduler.add_noise(x, noise, timesteps)
         unet_output = self.unet(noisy_x, timesteps, cond).sample
+        
+        if self.noise_scheduler.config.prediction_type == "epsilon":
+            target = noise
+        elif self.noise_scheduler.config.prediction_type == "v_prediction":
+            target = self.noise_scheduler.get_velocity(x, noise, timesteps)
+        else:
+            raise ValueError(f"Unknown prediction type {self.noise_scheduler.config.prediction_type}")
 
         # predict the noise
-        loss = F.mse_loss(unet_output, noise)
+        if self.snr_gamma is None:
+            loss = F.mse_loss(unet_output, target, reduction="mean")
+        else:
+            snr = compute_snr(self.noise_scheduler, timesteps)
+            mse_loss_weights = (
+                torch.stack([snr, self.snr_gamma * torch.ones_like(timesteps)], dim=1).min(dim=1)[0] / snr
+            )
+            # We first calculate the original loss. Then we mean over the non-batch dimensions and
+            # rebalance the sample-wise losses with their respective loss weights.
+            # Finally, we take the mean of the rebalanced loss.
+            loss = F.mse_loss(unet_output, target, reduction="none")
+            loss = loss.mean(dim=list(range(1, len(loss.shape)))) * mse_loss_weights
+            loss = loss.mean()
         self.log({"train/loss": loss.item()})
 
         return loss
@@ -235,3 +258,28 @@ class Text2ImageTrainingModule(TrainingModule):
         )
 
         return pipeline
+
+
+def compute_snr(noise_scheduler, timesteps):
+    """
+    Computes SNR as per https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L847-L849
+    """
+    alphas_cumprod = noise_scheduler.alphas_cumprod
+    sqrt_alphas_cumprod = alphas_cumprod**0.5
+    sqrt_one_minus_alphas_cumprod = (1.0 - alphas_cumprod) ** 0.5
+
+    # Expand the tensors.
+    # Adapted from https://github.com/TiankaiHang/Min-SNR-Diffusion-Training/blob/521b624bd70c67cee4bdf49225915f5945a872e3/guided_diffusion/gaussian_diffusion.py#L1026
+    sqrt_alphas_cumprod = sqrt_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
+    while len(sqrt_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_alphas_cumprod = sqrt_alphas_cumprod[..., None]
+    alpha = sqrt_alphas_cumprod.expand(timesteps.shape)
+
+    sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod.to(device=timesteps.device)[timesteps].float()
+    while len(sqrt_one_minus_alphas_cumprod.shape) < len(timesteps.shape):
+        sqrt_one_minus_alphas_cumprod = sqrt_one_minus_alphas_cumprod[..., None]
+    sigma = sqrt_one_minus_alphas_cumprod.expand(timesteps.shape)
+
+    # Compute SNR.
+    snr = (alpha / sigma) ** 2
+    return snr
