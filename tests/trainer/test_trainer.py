@@ -1,61 +1,54 @@
 import pytest
-import tempfile
 
-from mugen import Trainer, TrainingArguments
-from mugen.datamodules import ImageDataModule
-from mugen.trainingmodules import DDPMTrainingModule
-
-
-def test_trainer_train():
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        args = TrainingArguments(
-            tmp_dir, train_batch_size=2, eval_batch_size=1, num_epochs=1
-        )
-
-        tm = DDPMTrainingModule(
-            unet_config=dict(sample_size=32, block_out_channels=[32, 32, 32, 32]),
-            scheduler_config=dict(),
-        )
-
-        dtm = ImageDataModule(
-            "cifar10",
-            train_split="train[:2]",
-            val_split="test[2:4]",
-            image_column='img',
-            resolution=32,
-        )
-
-        trainer = Trainer(
-            "temp", tm, args, dtm.get_training_dataset(), dtm.get_validation_dataset()
-        )
-        trainer.start()
+import torch
+from mugen.trainingmodules import VAETrainingModule
+from mugen.losses.lpips import is_lpips_available
 
 
-def test_trainer_load_ckpt():
-    print("BRUH")
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        args = TrainingArguments(
-            tmp_dir,
-            train_batch_size=2,
-            eval_batch_size=1,
-            num_epochs=1,
-            save_steps=1,
-            save_total_limit=1,
-            resume_from_checkpoint='latest'
+@pytest.mark.skipif(not is_lpips_available(), reason="LPIPS is not installed")
+@pytest.mark.parametrize(
+    "batch",
+    [
+        {
+            "image": torch.randn(1, 3, 64, 64),
+        }
+    ],
+)
+def test_forward_lpips(batch):
+    module = VAETrainingModule(
+        pretrained_name_or_path="stabilityai/sd-vae-ft-mse",
+        lpips_config=dict(disc_start=0),
+    )
+
+    output = module.training_step(batch, 0, 0)
+    assert isinstance(output, torch.Tensor)
+
+    output = module.training_step(batch, 0, 1)
+    assert isinstance(output, torch.Tensor)
+
+
+@pytest.mark.skipif(is_lpips_available(), reason="LPIPS is installed")
+def test_lpips_not_avaiable_error():
+    with pytest.raises(AssertionError):
+        module = VAETrainingModule(
+            pretrained_name_or_path="stabilityai/sd-vae-ft-mse",
+            lpips_config=dict(disc_start=0),
+            use_ema=False,
         )
-        tm = DDPMTrainingModule(
-            unet_config=dict(sample_size=32, block_out_channels=[32, 32, 32, 32]),
-            scheduler_config=dict(),
-        )
-        dtm = ImageDataModule(
-            "cifar10",
-            train_split="train[:4]",
-            val_split="test[4:8]",
-            image_column='img',
-            resolution=32,
-        )
-        trainer = Trainer(
-            "temp", tm, args, dtm.get_training_dataset(), dtm.get_validation_dataset()
-        )
-        trainer.start()
-        trainer.accelerator.load_state()
+
+
+@pytest.mark.parametrize(
+    "batch",
+    [
+        {
+            "image": torch.randn(1, 3, 64, 64),
+        }
+    ],
+)
+def test_forward_mse(batch):
+    module = VAETrainingModule(
+        pretrained_name_or_path="stabilityai/sd-vae-ft-mse",
+    )
+
+    output = module.training_step(batch, 0, 0)
+    assert isinstance(output, torch.Tensor)
