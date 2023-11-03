@@ -32,6 +32,8 @@ def test_get_data(
         resolution=resolution,
         vae_pretrained_name_or_path='stabilityai/sd-vae-ft-mse'
     )
+    dtm.prepare_data()
+    dtm.setup()
 
     assert dtm.get_training_dataset() is not None
     assert dtm.get_validation_dataset() is not None

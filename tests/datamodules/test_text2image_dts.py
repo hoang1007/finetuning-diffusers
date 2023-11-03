@@ -34,6 +34,8 @@ def test_get_data(
         resolution=resolution,
         pipeline_name_or_path='CompVis/stable-diffusion-v1-4'
     )
+    dtm.prepare_data()
+    dtm.setup()
 
     assert dtm.get_training_dataset() is not None
     assert dtm.get_validation_dataset() is not None
