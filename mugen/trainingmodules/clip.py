@@ -4,11 +4,10 @@ from collections import defaultdict
 
 import torch
 import torch.nn.functional as F
-from torch.optim import Optimizer
 
-from .base import TrainingModule
+from lightning_accelerate import TrainingModule
+from lightning_accelerate.metrics import MeanMetric
 from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer, CLIPImageProcessor
-from mugen.metrics import MeanMetric
 
 
 class CLIPTrainingModule(TrainingModule):

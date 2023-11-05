@@ -1,12 +1,10 @@
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Dict
 import os.path as osp
 
 import torch
 import torch.nn.functional as F
-from torch.optim import Optimizer
 
-from .base import TrainingModule
-from omegaconf import DictConfig
+from lightning_accelerate import TrainingModule
 
 from diffusers.models import UNet2DModel
 from diffusers import DDIMPipeline, DDIMScheduler
@@ -16,9 +14,9 @@ from diffusers.training_utils import EMAModel
 class DDPMTrainingModule(TrainingModule):
     def __init__(
         self,
-        unet_config: Optional[DictConfig] = None,
+        unet_config: Optional[Dict] = None,
         pretrained_name_or_path: Optional[str] = None,
-        scheduler_config: Optional[DictConfig] = None,
+        scheduler_config: Optional[Dict] = None,
         input_key: str = "image",
         conditional_key: str = "label",
         use_ema: bool = True,

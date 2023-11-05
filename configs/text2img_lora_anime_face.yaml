@@ -1,26 +1,26 @@
 training_args:
   output_dir: outputs
-  num_epochs: 200
+  num_epochs: 20
 
-  learning_rate: 5e-6
+  learning_rate: 1e-4
   lr_scheduler_type: constant_with_warmup
   warmup_steps: 1000
 
-  train_batch_size: 16
+  train_batch_size: 1
   eval_batch_size: 2
-  data_loader_num_workers: 8
+  data_loader_num_workers: 2
 
   eval_steps: 2000
 
   gradient_accumulation_steps: 1
   mixed_precision: fp16
-  use_8bit_adam: true
+  use_8bit_adam: false
   use_lora: true
   lora_rank: 8
   lora_alpha: 32
   use_effective_conv2d: true
 
-  logger: wandb
+  tracker: wandb
   save_steps: 1000
   save_total_limit: 3
   resume_from_checkpoint: latest
@@ -32,23 +32,25 @@ training_args:
 training_module:
   _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
   pretrained_name_or_path: Ojimi/anime-kawai-diffusion
-  tokenizer_pretrained_name_or_path: outputs/clip_anime_face/checkpoint-4000/tokenizer
-  text_encoder_pretrained_name_or_path: outputs/clip_anime_face/checkpoint-4000/text_encoder
-
   use_ema: false
-  enable_xformers_memory_efficient_attention: true
+  # enable_xformers_memory_efficient_attention: true
   enable_gradient_checkpointing: true
   run_safety_checker: false
+  caption_key: text
+  use_latent_input: true
 
 datamodule:
   _target_: mugen.datamodules.Text2ImageDataModule
-  data_path: huanngzh/anime_face_control_60k
-  train_split: train[:95%]
+  # data_path: huanngzh/anime_face_control_60k
+  data_path: lambdalabs/pokemon-blip-captions
+  train_split: train[:5%]
   val_split: train[95%:]
-  image_column: target
-  caption_column: prompt
-  resolution: 512
+  # image_column: target
+  # caption_column: prompt
+  image_column: image
+  caption_column: text
+  resolution: 256
   random_flip: false
   pipeline_name_or_path: ${training_module.pretrained_name_or_path}
-  batch_size: 4
-#  load_cached: false
+  batch_size: 2
+  cache_latents: true
