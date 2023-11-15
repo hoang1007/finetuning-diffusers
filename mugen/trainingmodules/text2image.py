@@ -1,4 +1,5 @@
-from typing import List, Optional, Iterable, Literal, Dict
+from typing import List, Optional, Iterable, Literal
+import os
 
 import torch
 import torch.nn.functional as F
@@ -7,14 +8,15 @@ from lightning_accelerate import TrainingModule
 from lightning_accelerate.metrics import MeanMetric
 
 from diffusers.models import UNet2DConditionModel, AutoencoderKL
-from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPImageProcessor
-from diffusers import StableDiffusionPipeline, DDPMScheduler, PNDMScheduler
+from transformers import CLIPTextModel, CLIPTokenizer
+from diffusers import DDPMScheduler
 from diffusers.training_utils import EMAModel
+
+from mugen.loaders import load_pipeline
 
 
 class Text2ImageTrainingModule(TrainingModule):
-    LORA_TARGET_MODULES = [
+    UNET_TARGET_MODULES = [
         "to_q",
         "to_k",
         "to_v",
@@ -29,20 +31,21 @@ class Text2ImageTrainingModule(TrainingModule):
         "time_emb_proj",
         "ff.net.2",
     ]
+    CLIP_TARGET_MODULES = ["fc1", "fc2", "q_proj", "k_proj", "v_proj", "out_proj"]
+    LORA_TARGET_MODULES = UNET_TARGET_MODULES + CLIP_TARGET_MODULES
 
     def __init__(
         self,
-        pretrained_name_or_path: Optional[str] = None,
-        unet_config: Optional[Dict] = None,
-        unet_pretrained_name_or_path: Optional[str] = None,
+        pretrained_name_or_path: str,
         tokenizer_pretrained_name_or_path: Optional[str] = None,
         vae_pretrained_name_or_path: Optional[str] = None,
         text_encoder_pretrained_name_or_path: Optional[str] = None,
         scheduler_pretrained_name_or_path: Optional[str] = None,
         safety_checker_pretrained_name_or_path: Optional[str] = None,
         feature_extractor_pretrained_name_or_path: Optional[str] = None,
-        input_key: str = "image",
-        caption_key: str = "text",
+        is_from_original_sd: bool = False,
+        train_text_encoder: bool = True,
+        clip_skip: int = 0,
         use_latent_input: bool = False,
         snr_gamma: Optional[float] = None,
         prediction_type: Optional[Literal["epsilon", "v_prediction"]] = None,
@@ -51,75 +54,73 @@ class Text2ImageTrainingModule(TrainingModule):
         enable_gradient_checkpointing: bool = False,
         run_safety_checker: bool = True,
     ):
+        """Training Module for Text2Image
+
+        Args:
+            pretrained_name_or_path (Optional[str], optional): Pretrained path of base model.
+            It could be a model's name from hub, local checkpoint directory, single checkpoint file with diffusers format or original format.
+            tokenizer_pretrained_name_or_path (Optional[str], optional): Tokenizer path to override the base. Defaults to None.
+            vae_pretrained_name_or_path (Optional[str], optional): VAE pretrained path to override the base. Defaults to None.
+            text_encoder_pretrained_name_or_path (Optional[str], optional): Text Encoder pretrained path to override the base. Defaults to None.
+            scheduler_pretrained_name_or_path (Optional[str], optional): Scheduler path to override the base. Defaults to None.
+            safety_checker_pretrained_name_or_path (Optional[str], optional): Safety checker to override the base. Defaults to None.
+            feature_extractor_pretrained_name_or_path (Optional[str], optional): Pretrained path of feature extractor of safety checker to override the base. Defaults to None.
+            is_from_original_sd (bool, optional): Whether provided `pretrained_name_or_path` is original (CompVis) format or not. Defaults to False.
+            train_text_encoder (bool, optional): Whether to train text encoder or not. Defaults to True.
+            clip_skip (int, optional): The number of layers of CLIP text encoder to skip. Higher number can lead to better quality. Defaults to 0.
+            use_latent_input (bool, optional): If `True`, model will assume the provided input is latent. Defaults to False.
+            snr_gamma (Optional[float], optional): Min snr gamma. Set to 5.0 is recommended. Defaults to None.
+            prediction_type (Optional[Literal[&quot;epsilon&quot;, &quot;v_prediction&quot;]], optional): Prediction type. Defaults to None (will be infer from scheduler)
+            use_ema (bool, optional): Use EMA. Defaults to True.
+            enable_xformers_memory_efficient_attention (bool, optional): Enable xformers. Defaults to False.
+            enable_gradient_checkpointing (bool, optional): Enable gradient checkpoint. This will slightly reduce memory consuming. Defaults to False.
+            run_safety_checker (bool, optional): Whether to run safety checker to detect NFSW content or not. Defaults to True.
+        """
         super().__init__()
 
-        if unet_config is not None:
-            self.unet = UNet2DConditionModel(**unet_config)
-        elif unet_pretrained_name_or_path is not None:
-            self.unet = UNet2DConditionModel.from_pretrained(
-                unet_pretrained_name_or_path
-            )
-        elif pretrained_name_or_path is not None:
-            self.unet = UNet2DConditionModel.from_pretrained(
-                pretrained_name_or_path, subfolder="unet"
-            )
-        else:
-            raise ValueError(
-                "Either `unet_config` or `pretrained_name_or_path` or `unet_pretrained_name_or_path` must be specified!"
-            )
+        self.input_key = "image"
+        self.caption_key = "text"
+
+        pipeline = load_pipeline(pretrained_name_or_path, is_from_original_sd)
+
+        self.unet = pipeline.unet
 
         if scheduler_pretrained_name_or_path is not None:
             self.noise_scheduler = DDPMScheduler.from_pretrained(
                 scheduler_pretrained_name_or_path
             )
-        elif pretrained_name_or_path is not None:
-            self.noise_scheduler = DDPMScheduler.from_pretrained(
-                pretrained_name_or_path, subfolder="scheduler"
-            )
         else:
-            raise ValueError(
-                "Either `scheduler_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-            )
+            self.noise_scheduler = DDPMScheduler.from_config(pipeline.scheduler.config)
 
         if text_encoder_pretrained_name_or_path is not None:
             self.text_encoder = CLIPTextModel.from_pretrained(
                 text_encoder_pretrained_name_or_path
             )
-        elif pretrained_name_or_path is not None:
-            self.text_encoder = CLIPTextModel.from_pretrained(
-                pretrained_name_or_path, subfolder="text_encoder"
-            )
         else:
-            raise ValueError(
-                "Either `text_encoder_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
+            self.text_encoder = pipeline.text_encoder
+
+        if clip_skip > 0:
+            self.text_encoder.text_model.encoder.layers = (
+                self.text_encoder.text_model.encoder.layers[:-clip_skip]
             )
 
         if tokenizer_pretrained_name_or_path is not None:
             self.tokenizer = CLIPTokenizer.from_pretrained(
                 tokenizer_pretrained_name_or_path
             )
-        elif pretrained_name_or_path is not None:
-            self.tokenizer = CLIPTokenizer.from_pretrained(
-                pretrained_name_or_path, subfolder="tokenizer"
-            )
         else:
-            raise ValueError(
-                "Either `tokenizer_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-            )
+            self.tokenizer = pipeline.tokenizer
 
         if not use_latent_input:
             if vae_pretrained_name_or_path is not None:
                 self.vae = AutoencoderKL.from_pretrained(vae_pretrained_name_or_path)
-            elif pretrained_name_or_path is not None:
-                self.vae = AutoencoderKL.from_pretrained(
-                    pretrained_name_or_path, subfolder="vae"
-                )
             else:
-                raise ValueError(
-                    "Either `vae_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-                )
+                self.vae = pipeline.vae
         else:
-            self.register_to_config(input_key='latent')
+            self.input_key = "latent"
+
+        if not train_text_encoder:
+            self.text_encoder.requires_grad_(False)
 
         if prediction_type is not None:
             self.noise_scheduler.register_to_config(prediction_type=prediction_type)
@@ -139,7 +140,7 @@ class Text2ImageTrainingModule(TrainingModule):
                 model_config=self.unet.config,
             )
 
-        self.vae_config = self.get_pipeline().vae.config
+        self.vae_config = pipeline.vae.config
         self.loss_log = MeanMetric()
 
     def on_start(self):
@@ -148,15 +149,15 @@ class Text2ImageTrainingModule(TrainingModule):
 
     def get_latents(self, batch):
         if self.config.use_latent_input:
-            return batch[self.config.input_key]
+            latents = batch[self.input_key]
         else:
-            imgs = batch[self.config.input_key]
+            imgs = batch[self.input_key]
             latents = self.vae.encode(imgs).latent_dist.sample()
 
-        return latents * self.vae_config.scaling_factor
+        return latents
 
     def get_text_embeds(self, batch):
-        texts = batch[self.config.caption_key]
+        texts = batch[self.caption_key]
         encoded = self.tokenizer(
             texts,
             return_tensors="pt",
@@ -170,7 +171,7 @@ class Text2ImageTrainingModule(TrainingModule):
         return text_embeds
 
     def training_step(self, batch, batch_idx: int, optimizer_idx: int):
-        latents = self.get_latents(batch)
+        latents = self.get_latents(batch) * self.vae_config.scaling_factor
         encoder_hidden_states = self.get_text_embeds(batch)
         noise = torch.randn_like(latents)
         timesteps = torch.randint(
@@ -215,9 +216,9 @@ class Text2ImageTrainingModule(TrainingModule):
         return loss
 
     def on_train_batch_end(self):
-        if self.use_ema:
+        if self.config.use_ema:
             self.ema.step(self.unet.parameters())
-    
+
     def on_train_epoch_end(self):
         self.loss_log.reset()
 
@@ -242,11 +243,14 @@ class Text2ImageTrainingModule(TrainingModule):
         if self.config.enable_xformers_memory_efficient_attention:
             pipeline.enable_xformers_memory_efficient_attention()
 
-        real_images = pipeline.vae.decode(batch[self.input_key], return_dict=False)[0]
+        real_images = pipeline.vae.decode(self.get_latents(batch), return_dict=False)[0]
         real_images = (real_images / 2 + 0.5).clamp(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
         real_images = real_images.cpu().permute(0, 2, 3, 1).float().numpy()
-        gen_images = pipeline(prompt_embeds=encoder_hidden_states, output_type="np").images
+        gen_images = pipeline(
+            prompt_embeds=encoder_hidden_states,
+            output_type="np",
+        ).images
         del pipeline
 
         if self.config.use_ema:
@@ -255,7 +259,10 @@ class Text2ImageTrainingModule(TrainingModule):
         self.log_images({"generated": gen_images, "real": real_images})
 
     def get_optim_params(self) -> List[Iterable[torch.nn.Parameter]]:
-        return [self.unet.parameters()]
+        params = [{"params": self.unet.parameters()}]
+        if self.config.train_text_encoder:
+            params.append({"params": self.text_encoder.parameters(), "lr_scale": 0.5})
+        return params
 
     def save_pretrained(self, output_dir: str):
         if self.config.use_ema:
@@ -268,73 +275,23 @@ class Text2ImageTrainingModule(TrainingModule):
             self.ema.restore(self.unet.parameters())
 
     def get_pipeline(self):
-        if self.config.use_latent_input:
-            if self.config.vae_pretrained_name_or_path:
-                vae = AutoencoderKL.from_pretrained(self.config.vae_pretrained_name_or_path)
-            elif self.config.pretrained_name_or_path:
-                vae = AutoencoderKL.from_pretrained(
-                    self.config.pretrained_name_or_path, subfolder="vae"
-                )
-            else:
-                raise ValueError(
-                    "Either `vae_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-                )
-        else:
+        if (
+            self.config.use_latent_input
+            and self.config.vae_pretrained_name_or_path is not None
+        ):
+            vae = AutoencoderKL.from_pretrained(self.config.vae_pretrained_name_or_path)
+        elif not self.config.use_latent_input:
             vae = self.vae
-
-        if not self.config.run_safety_checker:
-            safety_checker = None
-        elif self.config.safety_checker_pretrained_name_or_path:
-            safety_checker = StableDiffusionSafetyChecker.from_pretrained(
-                self.config.safety_checker_pretrained_name_or_path
-            )
-        elif self.config.pretrained_name_or_path:
-            safety_checker = StableDiffusionSafetyChecker.from_pretrained(
-                self.config.pretrained_name_or_path, subfolder="safety_checker"
-            )
         else:
-            raise ValueError(
-                "Either `safety_checker_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-            )
+            vae = None
 
-        if self.config.feature_extractor_pretrained_name_or_path:
-            feature_extractor = CLIPImageProcessor.from_pretrained(
-                self.config.feature_extractor_pretrained_name_or_path
-            )
-        elif self.config.pretrained_name_or_path:
-            feature_extractor = CLIPImageProcessor.from_pretrained(
-                self.config.pretrained_name_or_path, subfolder="feature_extractor"
-            )
-        else:
-            raise ValueError(
-                "Either `feature_extractor_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-            )
-
-        if self.config.scheduler_pretrained_name_or_path:
-            scheduler = PNDMScheduler.from_pretrained(
-                self.config.scheduler_pretrained_name_or_path
-            )
-        elif self.config.pretrained_name_or_path:
-            scheduler = PNDMScheduler.from_pretrained(
-                self.config.pretrained_name_or_path, subfolder="scheduler"
-            )
-        else:
-            raise ValueError(
-                "Either `scheduler_pretrained_name_or_path` or `pretrained_name_or_path` must be specified!"
-            )
-
-        pipeline = StableDiffusionPipeline(
+        return load_pipeline(
+            pretrained_name_or_path=self.config.pretrained_name_or_path,
+            is_from_original_sd=self.config.is_from_original_sd,
             vae=vae,
             text_encoder=self.text_encoder,
             tokenizer=self.tokenizer,
-            unet=self.unet,
-            scheduler=scheduler,
-            safety_checker=safety_checker,
-            feature_extractor=feature_extractor,
-            requires_safety_checker=self.config.run_safety_checker,
         )
-
-        return pipeline
 
 
 def compute_snr(noise_scheduler, timesteps):

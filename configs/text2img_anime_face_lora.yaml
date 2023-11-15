@@ -1,0 +1,57 @@
+training_module:
+  _target_: mugen.trainingmodules.text2image.Text2ImageTrainingModule
+  pretrained_name_or_path: runwayml/stable-diffusion-v1-5
+  is_from_original_sd: false
+  use_ema: false
+  enable_xformers_memory_efficient_attention: true
+  # enable_gradient_checkpointing: true
+  run_safety_checker: false
+  use_latent_input: true
+  snr_gamma: 5.0
+  clip_skip: 2
+
+datamodule:
+  _target_: mugen.datamodules.Text2ImageDataModule
+  data_path: huanngzh/anime_face_control_60k
+  train_split: train[:10%]
+  val_split: train[95%:]
+  image_column: target
+  caption_column: prompt
+  resolution: 512
+  pipeline_name_or_path: ${training_module.pretrained_name_or_path}
+  is_from_original_sd: ${training_module.is_from_original_sd}
+  batch_size: 1
+  cache_latents: true
+  shuffle_tags: true
+
+training_args:
+  output_dir: outputs
+  num_epochs: 100
+
+  learning_rate: 1e-4
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 100
+
+  train_batch_size: 4
+  eval_batch_size: 1
+  data_loader_num_workers: 4
+
+  eval_steps: 100
+
+  max_grad_norm: 1.0
+  gradient_accumulation_steps: 1
+  mixed_precision: fp16
+  use_8bit_adam: true
+  use_lora: true
+  lora_rank: 32
+  lora_alpha: 32
+
+  tracker: wandb
+  save_steps: 1000
+  save_total_limit: 1
+  resume_from_checkpoint: latest
+  tracker_init_kwargs:
+    group: 'animeface'
+    name: ${training_args.experiment_name}
+    tags: ['animeface', 'sd_v1.5']
+  experiment_name: 'text2img-animeface-finetuning-sd_v1.5'
