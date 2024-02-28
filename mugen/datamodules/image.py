@@ -43,7 +43,7 @@ class ImageDataModule(DataModule):
                     self.config.resolution, transforms.InterpolationMode.BILINEAR
                 ),
                 transforms.CenterCrop(self.config.resolution)
-                if self.center_crop
+                if self.config.center_crop
                 else transforms.RandomCrop(self.config.resolution),
                 transforms.RandomHorizontalFlip()
                 if self.config.random_flip
@@ -57,7 +57,7 @@ class ImageDataModule(DataModule):
 
         def transform_images(examples):
             images = [
-                augs(image.convert("RGB")) for image in examples[self.config.image_column]
+                augs(image) for image in examples[self.config.image_column]
             ]
             ret = {"image": images}
             return ret
