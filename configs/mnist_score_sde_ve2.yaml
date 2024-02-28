@@ -1,0 +1,49 @@
+training_args:
+  output_dir: outputs
+  num_epochs: 100
+
+  learning_rate: 1e-4
+  lr_scheduler_type: constant_with_warmup
+  warmup_steps: 1000
+
+  train_batch_size: 128
+  eval_batch_size: 64
+  data_loader_num_workers: 2
+
+  max_grad_norm: 2.0
+  tracker: wandb
+  # mixed_precision: fp16
+  # eval_steps: 10
+  save_steps: 1000
+  save_total_limit: 3
+  # resume_from_checkpoint: latest
+
+  tracker_init_kwargs:
+    group: 'score-sde'
+    name: 'score-sde-mnist-1d'
+
+training_module:
+  _target_: mugen.trainingmodules.score_sde_ve2.ScoreSdeVeTrainingModule
+  unet_config:
+    input_dim: 1
+    hidden_dim: 32
+    dim_cond_mult: 4
+    num_attn_heads: 8
+    fft_conv1d_input_size: 64
+    fft_conv1d_kernel: [3, 1]
+    fft_conv1d_padding: [1, 0]
+    depth: 4
+
+  scheduler_config:
+    sigma_min: 0.01
+    sigma_max: 50
+    num_train_timesteps: 1000
+
+datamodule:
+  _target_: mugen.datamodules.image.ImageDataModule
+  data_path: mnist
+  train_split: train
+  val_split: test
+  image_column: image
+  resolution: 32
+  random_flip: false
