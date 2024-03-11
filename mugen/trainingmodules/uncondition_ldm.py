@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Optimizer
 
-from .base import TrainingModule
+from lightning_accelerate import TrainingModule
 from omegaconf import DictConfig
 
 from diffusers.models import UNet2DModel, AutoencoderKL

@@ -3,7 +3,7 @@ from warnings import warn
 
 import torch
 
-from .base import TrainingModule
+from lightning_accelerate import TrainingModule
 from mugen.losses.lpips import LPIPSWithDiscriminator, is_lpips_available
 from omegaconf import DictConfig
 

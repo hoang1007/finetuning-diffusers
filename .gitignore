@@ -171,3 +171,6 @@ outputs/
 .cache/
 cache/
 taming/
+
+# Data
+data/
